@@ -127,8 +127,20 @@ def run_pipeline(config: dict) -> None:
         learning_rate=config["sentiment_baseline"]["learning_rate"],
         epochs=config["sentiment_baseline"]["epochs"],
     )
-    sa_model = GlobalSentimentBERT(sa_config)
-    sa_model.fit(train_df_sa, val_df_sa)
+
+    # Checkpoint tahap 4 -- tahap paling mahal (training BERT bisa berjam-jam).
+    # Kalau checkpoint sudah ada (mis. dari run sebelumnya yang sukses sampai
+    # tahap 4 tapi lalu gagal/disconnect di tahap 5-8), langsung load & skip
+    # training, JANGAN ulang dari nol.
+    sa_checkpoint_dir = Path(config["logging"]["checkpoint_dir"]) / "sentiment_bert"
+    if (sa_checkpoint_dir / "config.json").exists():
+        logger.info("Checkpoint SA ditemukan di %s -- memuat model, skip training.", sa_checkpoint_dir)
+        sa_model = GlobalSentimentBERT.load(str(sa_checkpoint_dir), sa_config)
+    else:
+        sa_model = GlobalSentimentBERT(sa_config)
+        sa_model.fit(train_df_sa, val_df_sa)
+        sa_checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        sa_model.save(str(sa_checkpoint_dir))
 
     # Skor sentimen (probabilitas) untuk SEMUA baris (train/val/test),
     # dipakai sebagai fitur numerik ke fusion layer -- bukan label biner.

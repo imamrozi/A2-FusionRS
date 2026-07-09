@@ -108,6 +108,15 @@ python run_baseline.py --config configs/yelp_config.yaml
 - **Checkpoint ke Google Drive** jika dijalankan di Colab -- set
   `logging.checkpoint_dir` di config ke path yang di-mount ke Drive, karena
   runtime Colab bisa disconnect sewaktu-waktu.
+- **Resume otomatis tahap 4 (SA/BERT)**: `run_baseline.py` menyimpan model SA
+  ke `<checkpoint_dir>/sentiment_bert/` setelah training selesai, dan akan
+  otomatis skip training (load checkpoint) di run berikutnya kalau folder itu
+  sudah ada -- supaya training BERT yang berjam-jam tidak perlu diulang dari
+  nol kalau pipeline gagal/disconnect di tahap 5-8. Kalau sengaja mau retrain
+  ulang SA (misal setelah ganti hyperparameter sentiment), **hapus dulu**
+  folder `<checkpoint_dir>/sentiment_bert/` sebelum menjalankan ulang.
+  Tahap lain (DeepMF, CBF, fusion) belum punya resume serupa karena jauh
+  lebih cepat sehingga risiko kehilangan progress lebih rendah.
 
 ## Struktur Selanjutnya (Fase 2 & A2-FusionRS)
 

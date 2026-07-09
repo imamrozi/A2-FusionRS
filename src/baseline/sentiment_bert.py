@@ -252,6 +252,21 @@ class GlobalSentimentBERT:
         self.tokenizer.save_pretrained(path)
         logger.info("Model SA disimpan ke %s", path)
 
+    @classmethod
+    def load(cls, path: str, config: SentimentBertConfig | None = None) -> "GlobalSentimentBERT":
+        """Muat model SA yang sudah di-fine-tune dari checkpoint (hasil save()
+        sebelumnya) -- dipakai run_baseline.py untuk skip training tahap 4
+        kalau checkpoint sudah ada, supaya training BERT yang makan waktu
+        berjam-jam tidak perlu diulang dari nol setiap kali Colab disconnect
+        di tahap SETELAH tahap 4 (mis. bug/error di tahap 6-8)."""
+        instance = cls(config)
+        instance.tokenizer = AutoTokenizer.from_pretrained(path)
+        instance.model = AutoModelForSequenceClassification.from_pretrained(path).to(
+            instance.config.device
+        )
+        logger.info("Model SA dimuat dari checkpoint %s (skip training tahap 4)", path)
+        return instance
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

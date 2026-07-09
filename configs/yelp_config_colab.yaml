@@ -33,7 +33,11 @@ preprocessing:
   lowercase: true
   remove_stopwords: true
   lemmatize: true
-  max_seq_length: 512
+  # 128 (bukan 512) -- sesuai Table 5 baseline paper (Darraz et al.), juga
+  # 4x lebih murah secara komputasi (attention kuadratik thd panjang
+  # sequence) -- penting untuk budget compute Colab. 512 dari proposal
+  # A2-FusionRS dipakai nanti khusus stream ABSA-BERT A2-FusionRS (Fase 2).
+  max_seq_length: 128
   tokenizer: "bert-base-uncased"
 
 sentiment_baseline:

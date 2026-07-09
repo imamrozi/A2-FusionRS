@@ -28,7 +28,13 @@ preprocessing:
   lowercase: true
   remove_stopwords: true
   lemmatize: true
-  max_seq_length: 512          # sesuai penyebutan padding/truncation di proposal
+  # 128 (bukan 512) -- sesuai Table 5 baseline paper (Darraz et al.). Nilai
+  # 512 dari proposal A2-FusionRS dipakai NANTI khusus untuk stream ABSA-BERT
+  # A2-FusionRS sendiri (Fase 2, src/a2fusionrs/), BUKAN untuk reimplementasi
+  # baseline ini -- baseline harus pakai hyperparameter asli paper untuk fair
+  # comparison. 512 juga 4x lebih mahal secara komputasi (attention kuadratik
+  # terhadap panjang sequence), signifikan untuk budget compute Colab Free.
+  max_seq_length: 128
   tokenizer: "bert-base-uncased"
 
 sentiment_baseline:
