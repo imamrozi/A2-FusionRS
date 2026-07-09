@@ -16,7 +16,7 @@ experiment:
   domain: "restaurant"   # "restaurant" atau "hotel" - dijalankan terpisah sesuai baseline
 
 data:
-  raw_path: "/content/drive/MyDrive/PHD-STUDENTS/Code/A2-FusionRS/data/raw/yelp_training_set_review.csv"
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/yelp_training_set_review.csv"
   business_attributes_required: ["business_categories", "business_stars", "business_city"]
   min_reviews_per_user: 5
   min_reviews_per_item: 5
@@ -27,7 +27,7 @@ split:
   val_ratio: 0.1
   test_ratio: 0.1
   cold_start_holdout: true
-  output_dir: "/content/drive/MyDrive/PHD-STUDENTS/Code/A2-FusionRS/data/splits/yelp_restaurant"
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/yelp_restaurant"
 
 preprocessing:
   lowercase: true
@@ -75,5 +75,5 @@ evaluation:
   significance_test: "wilcoxon"
 
 logging:
-  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENTS/Code/A2-FusionRS/checkpoints/yelp_restaurant"
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/yelp_restaurant"
   save_every_stage: true
