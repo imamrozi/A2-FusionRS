@@ -58,7 +58,10 @@ cbf_clustering:
 
 fusion_baseline:
   method: "nmf_decision_tree"
-  nmf_components: 5             # diturunkan dari 20 -- subset kecil, komponen besar berisiko error
+  # Fitur mentah cuma 3 kolom (DeepMF, CBF, sentiment) -- NMF tidak bisa
+  # punya komponen lebih banyak dari fitur input (Algorithm 1 paper pakai
+  # contoh n_components=3).
+  nmf_components: 3
   dt_max_depth: 5               # diturunkan dari 10 -- cegah overfit ekstrem pada subset kecil
 
 evaluation:

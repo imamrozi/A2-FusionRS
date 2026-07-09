@@ -6,6 +6,15 @@ SA + DeepMF + CBF menggunakan NMF (Non-negative Matrix Factorization) untuk
 reduksi dimensi, dilanjutkan DecisionTreeRegressor sebagai model prediksi
 rating akhir.
 
+Mengikuti Algorithm 1 (Section 3.4.3) paper persis:
+1. Fitur mentah = (DeepMF_predictions, cluster/CBF_predictions, BERT_Predictions)
+   -- 3 kolom, sehingga n_components NMF idealnya <= 3 (paper pakai contoh 3).
+2. NMF diterapkan ke fitur mentah untuk menghasilkan fitur laten.
+3. Fitur laten NMF di-CONCATENATE dengan fitur mentah asli (bukan
+   menggantikannya) -- lihat `_build_feature_matrix` & `fit()`/`predict()`
+   di bawah, langkah "Combine Original Features with NMF Features".
+4. DecisionTreeRegressor dilatih pada fitur gabungan tsb.
+
 PENTING (lih. diskusi anomali RMSE 0.01-0.02 di baseline paper):
 Fungsi `evaluate()` di modul ini WAJIB dijalankan pada held-out test set
 yang benar-benar terpisah (hasil split_generator.py), BUKAN pada train set.
@@ -29,7 +38,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class FusionConfig:
-    nmf_components: int = 20
+    # Fitur mentah hanya 3 kolom (DeepMF, CBF/cluster, BERT sentiment) --
+    # NMF tidak bisa menghasilkan komponen lebih banyak dari jumlah fitur
+    # input. Paper (Algorithm 1) memakai contoh n_components=3.
+    nmf_components: int = 3
     dt_max_depth: int = 10
     random_state: int = 42
 
@@ -75,11 +87,15 @@ class NMFDecisionTreeFusion:
         features_nonneg = features - np.minimum(self._feature_min, 0)
 
         nmf_features = self.nmf.fit_transform(features_nonneg)
-        self.dt.fit(nmf_features, y_true_ratings)
+        # Algorithm 1 langkah 3 (paper): gabungkan fitur asli dengan fitur
+        # laten NMF, JANGAN buang fitur aslinya.
+        combined_features = np.concatenate([features, nmf_features], axis=1)
+        self.dt.fit(combined_features, y_true_ratings)
         logger.info(
-            "Fusion NMF+DT dilatih pada %d sampel, %d komponen NMF",
+            "Fusion NMF+DT dilatih pada %d sampel, %d komponen NMF (+3 fitur asli = %d kolom input DT)",
             len(y_true_ratings),
             self.config.nmf_components,
+            combined_features.shape[1],
         )
 
     def predict(
@@ -93,7 +109,8 @@ class NMFDecisionTreeFusion:
         features = self._build_feature_matrix(sentiment_scores, deepmf_preds, cbf_preds)
         features_nonneg = features - np.minimum(self._feature_min, 0)
         nmf_features = self.nmf.transform(features_nonneg)
-        return self.dt.predict(nmf_features)
+        combined_features = np.concatenate([features, nmf_features], axis=1)
+        return self.dt.predict(combined_features)
 
 
 if __name__ == "__main__":
