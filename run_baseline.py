@@ -27,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 import yaml
 
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
@@ -58,7 +59,14 @@ def run_pipeline(config: dict) -> None:
     data_cfg = config["data"]
     split_cfg = config["split"]
 
+    # Seed SEMUA sumber randomness (numpy + PyTorch), bukan cuma numpy --
+    # penting untuk protokol n_seeds=3 + uji signifikansi Wilcoxon di
+    # evaluation config: tanpa ini, hasil BERT/DeepMF tidak reproducible
+    # dan tidak benar-benar bervariasi mengikuti seed yang diminta.
     np.random.seed(exp_cfg["seed"])
+    torch.manual_seed(exp_cfg["seed"])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(exp_cfg["seed"])
 
     # ---------- 1. Load data ----------
     logger.info("=== Tahap 1: Memuat data ===")
@@ -147,10 +155,15 @@ def run_pipeline(config: dict) -> None:
     )
 
     train_interactions = InteractionDataset(
-        train_df, user2idx, item2idx, len(all_items), deepmf_config.negative_sampling_ratio
+        train_df,
+        user2idx,
+        item2idx,
+        len(all_items),
+        deepmf_config.negative_sampling_ratio,
+        seed=exp_cfg["seed"],
     )
     val_interactions = InteractionDataset(
-        val_df, user2idx, item2idx, len(all_items), negative_ratio=0
+        val_df, user2idx, item2idx, len(all_items), negative_ratio=0, seed=exp_cfg["seed"]
     )
 
     deepmf_trainer = DeepMFTrainer(len(all_users), len(all_items), deepmf_config)
@@ -164,6 +177,7 @@ def run_pipeline(config: dict) -> None:
         method=config["cbf_clustering"]["method"],
         k_min=2,
         k_max=20,
+        random_state=exp_cfg["seed"],
     )
     cbf_predictor = CBFPredictor(cbf_config=cbf_config)
     cbf_predictor.fit(full_df_for_items, train_df)
@@ -192,6 +206,7 @@ def run_pipeline(config: dict) -> None:
     fusion_config = FusionConfig(
         nmf_components=config["fusion_baseline"]["nmf_components"],
         dt_max_depth=config["fusion_baseline"]["dt_max_depth"],
+        random_state=exp_cfg["seed"],
     )
     fusion_model = NMFDecisionTreeFusion(fusion_config)
     fusion_model.fit(

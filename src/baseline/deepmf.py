@@ -54,6 +54,7 @@ class InteractionDataset(Dataset):
         n_items: int,
         negative_ratio: int = 4,
         rating_scale: tuple[float, float] = (1.0, 5.0),
+        seed: int = 42,
     ):
         self.user2idx = user2idx
         self.item2idx = item2idx
@@ -72,7 +73,7 @@ class InteractionDataset(Dataset):
         for u, i in zip(users, items):
             user_positive_items.setdefault(u, set()).add(i)
 
-        rng = np.random.default_rng(42)
+        rng = np.random.default_rng(seed)
         neg_users, neg_items = [], []
         for u in users:
             seen = user_positive_items.get(u, set())
