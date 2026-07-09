@@ -1,0 +1,75 @@
+# .gitignore untuk a2fusionrs
+# Prinsip: kode (src/, scripts/, configs/, *.py, *.md) DI-COMMIT ke git.
+# Dataset, hasil training, environment, dan file spesifik-mesin TIDAK
+# di-commit -- terlalu besar untuk git dan berbeda per environment
+# (lokal vs Colab).
+
+# ============================================================
+# Dataset & split (besar, dan Anda unduh manual per environment)
+# ============================================================
+data/raw/
+data/splits/
+data/**/*.csv
+data/**/*.json
+
+# ============================================================
+# Hasil training: checkpoint model, hasil eksperimen
+# ============================================================
+checkpoints/
+results/
+*.pt
+*.pth
+*.safetensors
+*.bin
+
+# ============================================================
+# Virtual environment (venv lokal Windows/Mac/Linux)
+# ============================================================
+venv/
+env/
+ENV/
+.venv/
+
+# ============================================================
+# Python cache & bytecode
+# ============================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ============================================================
+# Jupyter/Colab notebook checkpoints
+# ============================================================
+.ipynb_checkpoints/
+
+# ============================================================
+# Environment variables / kredensial (JANGAN pernah commit)
+# ============================================================
+.env
+.env.*
+*.pem
+*credentials*.json
+kaggle.json
+
+# ============================================================
+# OS & IDE
+# ============================================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
+logs/
+
+# ============================================================
+# Distribution / packaging (kalau nanti dibuat pip package)
+# ============================================================
+build/
+dist/
+*.egg-info/

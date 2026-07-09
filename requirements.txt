@@ -1,0 +1,51 @@
+# requirements.txt
+# Untuk instalasi di LAPTOP LOKAL (i5/24GB RAM, tanpa GPU dedicated) via venv.
+# Untuk Google Colab, gunakan requirements-colab.txt (torch/pandas/numpy/scipy
+# TIDAK perlu diinstal ulang karena sudah tersedia default di runtime Colab).
+#
+# Instalasi:
+#   python3 -m venv venv
+#   source venv/bin/activate  (atau venv\Scripts\Activate.ps1 di Windows)
+#   pip install --upgrade pip
+#   pip install -r requirements.txt
+
+# --- Data processing & scientific computing ---
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+scipy>=1.10.0,<2.0.0
+
+# --- Machine learning klasik (DeepMF training loop, CBF clustering, fusion NMF+DT) ---
+scikit-learn>=1.3.0,<2.0.0
+
+# --- Deep learning & NLP (SA-BERT baseline, tokenisasi) ---
+# CPU-only build direkomendasikan untuk laptop tanpa GPU -- lihat catatan
+# instalasi khusus torch di bawah, karena default `pip install torch` bisa
+# menarik build CUDA yang jauh lebih besar (>2GB) tanpa manfaat di laptop ini.
+torch>=2.2.0,<3.0.0
+transformers>=4.38.0,<5.0.0
+
+# --- NLP preprocessing ---
+nltk>=3.8.1,<4.0.0
+
+# --- Konfigurasi ---
+PyYAML>=6.0,<7.0
+
+# --- Opsional: eksplorasi data & notebook ---
+matplotlib>=3.7.0,<4.0.0
+seaborn>=0.12.0,<1.0.0
+jupyter>=1.0.0
+
+# --- Opsional: progress bar untuk loop training panjang ---
+tqdm>=4.66.0
+
+# ============================================================
+# CATATAN INSTALASI TORCH CPU-ONLY (opsional tapi disarankan):
+# Jika ingin memastikan build CPU-only (lebih kecil, lebih cepat install
+# di laptop tanpa GPU), instal torch terpisah SEBELUM baris di atas:
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements.txt
+#
+# (baris "torch" di atas akan di-skip otomatis oleh pip jika versi yang
+# cocok sudah terpasang)
+# ============================================================

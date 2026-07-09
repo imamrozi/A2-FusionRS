@@ -1,0 +1,73 @@
+# configs/yelp_config.yaml
+# Konfigurasi eksperimen Fase 1 - Fair Comparison dengan Darraz et al. (ESWA 2025)
+# Domain: Yelp (restaurant & hotel), dataset harus IDENTIK dengan sumber baseline:
+# https://data.world/brianray/yelp-reviews/workspace/file?filename=yelp_training_set_review.csv
+
+experiment:
+  name: "yelp_baseline_reimplementation"
+  seed: 42
+  domain: "restaurant"   # "restaurant" atau "hotel" - dijalankan terpisah sesuai baseline
+
+data:
+  raw_path: "data/raw/yelp_training_set_review.csv"
+  # TODO(user): unduh manual dari link data.world di atas, lisensi/akses tidak
+  # bisa diambil otomatis oleh Claude via web_fetch. Letakkan file di path ini.
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 5     # filter cold-start ekstrem sebelum split utama
+  min_reviews_per_item: 5
+
+split:
+  strategy: "user_based"       # split per-user, bukan per-baris acak (cegah leakage)
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true     # sisihkan user/item baru sebagai skenario evaluasi terpisah
+  output_dir: "data/splits/yelp_restaurant"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 512          # sesuai penyebutan padding/truncation di proposal
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"                # baseline Darraz et al. = sentimen global, BUKAN per-aspek
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5          # sesuai Table 1 baseline paper (bukan 2e-5 versi A2-FusionRS)
+  batch_size: 16
+  epochs: 3
+  max_grad_norm: 1.0
+
+deepmf:
+  embedding_dim: 128
+  hidden_layers: [256, 128, 64, 32]
+  dropout: 0.3
+  batch_size: 512
+  learning_rate: 0.001
+  negative_sampling_ratio: 4
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"              # baseline: K-Means (restoran), Agglomerative (hotel)
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+
+fusion_baseline:
+  method: "nmf_decision_tree"   # sesuai baseline: NMF + DecisionTreeRegressor
+  nmf_components: 20
+  dt_max_depth: 10
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [5, 10, 20]
+  n_seeds: 3                    # ulangi dengan 3 seed berbeda, laporkan mean +/- std
+  significance_test: "wilcoxon"
+
+logging:
+  checkpoint_dir: "checkpoints/yelp_restaurant"
+  save_every_stage: true        # simpan checkpoint tiap stage (SA, DeepMF, CBF, fusion)
+  # PENTING untuk Colab: checkpoint_dir sebaiknya di-mount ke Google Drive
+  # agar tahan terhadap disconnect runtime.

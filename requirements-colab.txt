@@ -1,0 +1,32 @@
+# requirements-colab.txt
+# Untuk dijalankan di Google Colab (Pro/Pro+).
+# TIDAK menyertakan torch, pandas, numpy, scipy -- paket-paket ini SUDAH
+# terpasang default di runtime Colab dan versinya sudah dioptimalkan untuk
+# GPU (CUDA) yang dialokasikan. Menginstal ulang berisiko menimpa build
+# CUDA bawaan dengan versi yang tidak kompatibel.
+#
+# Instalasi (jalankan di cell notebook, bukan di terminal):
+#   !pip install -q -r requirements-colab.txt
+
+transformers>=4.38.0,<5.0.0
+scikit-learn>=1.3.0,<2.0.0
+nltk>=3.8.1,<4.0.0
+PyYAML>=6.0,<7.0
+tqdm>=4.66.0
+
+# ============================================================
+# SETELAH INSTALASI, jalankan di cell terpisah untuk resource NLTK:
+#
+#   import nltk
+#   nltk.download('stopwords')
+#   nltk.download('wordnet')
+#   nltk.download('omw-1.4')
+#
+# VERIFIKASI GPU sebelum training:
+#   !nvidia-smi
+#   import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))
+#
+# MOUNT GOOGLE DRIVE untuk checkpoint persist (wajib, runtime bisa disconnect):
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+# ============================================================
