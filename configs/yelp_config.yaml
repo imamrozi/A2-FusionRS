@@ -42,6 +42,15 @@ sentiment_baseline:
   mode: "global"                # baseline Darraz et al. = sentimen global, BUKAN per-aspek
   optimizer: "AdamW"
   learning_rate: 1.0e-5          # sesuai Table 1 baseline paper (bukan 2e-5 versi A2-FusionRS)
+  # ASUMSI (perlu dinyatakan di manuskrip): Table 5 paper TIDAK melaporkan
+  # jumlah epoch untuk training SA (beda dgn DeepMF yg eksplisit 20 epoch di
+  # Table 10) -- 3 di sini adalah rule-of-thumb umum fine-tuning BERT,
+  # BUKAN nilai yang diverifikasi dari paper.
+  # batch_size juga beda dari Table 5 paper (8) -- dinaikkan ke 16 karena
+  # alasan compute/waktu training, bukan replikasi persis hyperparameter.
+  # Table 5 juga menyebut "test size 30%" khusus utk sub-task SA (split
+  # terpisah dari split CF/CB) -- pipeline ini reuse split 80/10/10 yang
+  # sama untuk SA maupun CF/CB, deviasi lain yang perlu dicatat.
   batch_size: 16
   epochs: 3
   max_grad_norm: 1.0
@@ -60,6 +69,10 @@ cbf_clustering:
   method: "kmeans"              # baseline: K-Means (restoran), Agglomerative (hotel)
   k_selection: "elbow"
   feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  # Reduksi dimensi sebelum clustering, sesuai Fig. 5 paper (Concatenation ->
+  # PCA -> Clustering). Tanpa ini, silhouette score jauh lebih rendah dari
+  # paper (curse of dimensionality di ruang fitur ~1300+ dim).
+  pca_components: 50
 
 fusion_baseline:
   method: "nmf_decision_tree"   # sesuai baseline: NMF + DecisionTreeRegressor

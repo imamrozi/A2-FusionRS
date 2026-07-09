@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.decomposition import PCA
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import MultiLabelBinarizer, StandardScaler
@@ -34,18 +35,31 @@ class CBFConfig:
     k_min: int = 2
     k_max: int = 20
     tfidf_max_features: int = 500
+    # Jumlah komponen PCA sebelum clustering, sesuai pipeline paper (Fig. 5:
+    # Concatenation -> Dimensionality reduction (PCA) -> Clustering). Tanpa
+    # ini, KMeans/silhouette terdegradasi di ruang fitur berdimensi tinggi
+    # (curse of dimensionality) -- dibatasi otomatis ke min(pca_components,
+    # n_item-1, n_fitur) saat runtime supaya aman untuk subset kecil.
+    pca_components: int = 50
     random_state: int = 42
 
 
 class ItemFeatureBuilder:
-    """Bangun fitur item gabungan: kategori one-hot + TF-IDF + sentimen + popularitas."""
+    """Bangun fitur item gabungan: kategori one-hot + TF-IDF + sentimen + popularitas,
+    lalu reduksi dimensi dengan PCA sebelum clustering (sesuai Fig. 5 paper)."""
 
-    def __init__(self, tfidf_max_features: int = 500):
+    def __init__(self, tfidf_max_features: int = 500, pca_components: int = 50, random_state: int = 42):
         self.tfidf_max_features = tfidf_max_features
+        self.pca_components = pca_components
+        self.random_state = random_state
         self.mlb = MultiLabelBinarizer()
         self.tfidf = TfidfVectorizer(max_features=tfidf_max_features)
         self.scaler = StandardScaler()
+        self.pca: PCA | None = None
         self._fitted = False
+
+    def _combine_raw_features(self, cat_features, tfidf_features, numeric_features) -> np.ndarray:
+        return np.concatenate([cat_features, tfidf_features, numeric_features], axis=1)
 
     def fit_transform(self, item_df: pd.DataFrame) -> np.ndarray:
         """
@@ -62,16 +76,27 @@ class ItemFeatureBuilder:
         numeric_cols = ["sentiment_agg", "review_count", "avg_rating"]
         numeric_features = self.scaler.fit_transform(item_df[numeric_cols].values)
 
-        combined = np.concatenate([cat_features, tfidf_features, numeric_features], axis=1)
+        combined = self._combine_raw_features(cat_features, tfidf_features, numeric_features)
+
+        # PCA sebelum clustering (Fig. 5 paper: Concatenation -> Dimensionality
+        # reduction -> Clustering). n_components dibatasi otomatis supaya aman
+        # untuk subset kecil (mis. quicktest dengan sedikit item).
+        n_components = max(1, min(self.pca_components, combined.shape[0] - 1, combined.shape[1]))
+        self.pca = PCA(n_components=n_components, random_state=self.random_state)
+        reduced = self.pca.fit_transform(combined)
+
         self._fitted = True
         logger.info(
-            "Fitur item dibangun: %d kategori + %d TF-IDF + %d numerik = dim %d",
+            "Fitur item dibangun: %d kategori + %d TF-IDF + %d numerik = dim %d -> "
+            "PCA %d dim (explained variance ratio=%.3f)",
             cat_features.shape[1],
             tfidf_features.shape[1],
             numeric_features.shape[1],
             combined.shape[1],
+            reduced.shape[1],
+            self.pca.explained_variance_ratio_.sum(),
         )
-        return combined
+        return reduced
 
     def transform(self, item_df: pd.DataFrame) -> np.ndarray:
         if not self._fitted:
@@ -80,7 +105,8 @@ class ItemFeatureBuilder:
         tfidf_features = self.tfidf.transform(item_df["description_text"]).toarray()
         numeric_cols = ["sentiment_agg", "review_count", "avg_rating"]
         numeric_features = self.scaler.transform(item_df[numeric_cols].values)
-        return np.concatenate([cat_features, tfidf_features, numeric_features], axis=1)
+        combined = self._combine_raw_features(cat_features, tfidf_features, numeric_features)
+        return self.pca.transform(combined)
 
 
 class ContentBasedClusterer:
@@ -224,7 +250,11 @@ class CBFPredictor:
 
     def __init__(self, cbf_config: CBFConfig | None = None, tfidf_max_features: int = 500):
         self.cbf_config = cbf_config or CBFConfig()
-        self.feature_builder = ItemFeatureBuilder(tfidf_max_features=tfidf_max_features)
+        self.feature_builder = ItemFeatureBuilder(
+            tfidf_max_features=tfidf_max_features,
+            pca_components=self.cbf_config.pca_components,
+            random_state=self.cbf_config.random_state,
+        )
         self.clusterer = ContentBasedClusterer(self.cbf_config)
         self.item_cluster_labels: dict | None = None
         self.user_cluster_pref: pd.DataFrame | None = None

@@ -189,6 +189,7 @@ def run_pipeline(config: dict) -> None:
         method=config["cbf_clustering"]["method"],
         k_min=2,
         k_max=20,
+        pca_components=config["cbf_clustering"].get("pca_components", 50),
         random_state=exp_cfg["seed"],
     )
     cbf_predictor = CBFPredictor(cbf_config=cbf_config)

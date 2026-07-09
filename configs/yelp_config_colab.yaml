@@ -46,8 +46,15 @@ sentiment_baseline:
   optimizer: "AdamW"
   learning_rate: 1.0e-5
   # Dinaikkan dari 16 (default CPU-friendly) ke 32 -- aman untuk GPU T4/L4
-  # dengan max_seq_length=512. Naikkan ke 64 kalau memakai A100 dan memori
+  # dengan max_seq_length=128. Naikkan ke 64 kalau memakai A100 dan memori
   # masih longgar (cek !nvidia-smi setelah beberapa batch pertama).
+  # CATATAN FIDELITY (utk manuskrip): Table 5 paper pakai batch_size=8, kita
+  # naikkan demi waktu training -- bukan replikasi persis. Table 5 juga TIDAK
+  # melaporkan jumlah epoch SA sama sekali (beda dgn DeepMF yg eksplisit 20
+  # epoch di Table 10) -- epochs=3 di bawah ini asumsi rule-of-thumb, bukan
+  # nilai dari paper. Table 5 juga sebut "test size 30%" khusus sub-task SA
+  # (split terpisah dari CF/CB), sedangkan pipeline ini reuse split 80/10/10
+  # yang sama untuk semuanya.
   batch_size: 32
   epochs: 3
   max_grad_norm: 1.0
@@ -66,6 +73,10 @@ cbf_clustering:
   method: "kmeans"
   k_selection: "elbow"
   feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  # Reduksi dimensi sebelum clustering, sesuai Fig. 5 paper (Concatenation ->
+  # PCA -> Clustering). Tanpa ini, silhouette score jauh lebih rendah dari
+  # paper (curse of dimensionality di ruang fitur ~1300+ dim).
+  pca_components: 50
 
 fusion_baseline:
   method: "nmf_decision_tree"

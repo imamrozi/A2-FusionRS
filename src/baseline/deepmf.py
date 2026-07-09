@@ -13,6 +13,7 @@ sesuai proposal bagian E (Metode).
 
 from __future__ import annotations
 
+import copy
 import logging
 from dataclasses import dataclass
 
@@ -144,6 +145,15 @@ class DeepMFTrainer:
         optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config.learning_rate)
         criterion = nn.MSELoss()
 
+        # Model DeepMF ini cenderung overfit setelah beberapa epoch awal
+        # (val RMSE memburuk terus-menerus di observasi run penuh), sementara
+        # config.epochs tetap dijalankan penuh tanpa early stopping. Untuk
+        # itu kita lacak state_dict dengan val RMSE terbaik dan restore di
+        # akhir, supaya model yang dipakai stream selanjutnya BUKAN otomatis
+        # model epoch terakhir (yang bisa jadi justru yang terburuk).
+        best_val_rmse = float("inf")
+        best_state_dict = None
+
         self.model.train()
         for epoch in range(self.config.epochs):
             epoch_loss = 0.0
@@ -164,7 +174,19 @@ class DeepMFTrainer:
             if val_dataset is not None:
                 val_rmse = self.evaluate_rmse(val_dataset)
                 log_msg += f" - val RMSE (normalized): {val_rmse:.4f}"
+                if val_rmse < best_val_rmse:
+                    best_val_rmse = val_rmse
+                    best_state_dict = copy.deepcopy(self.model.state_dict())
+                    log_msg += " (terbaik sejauh ini, disimpan)"
             logger.info(log_msg)
+
+        if val_dataset is not None and best_state_dict is not None:
+            self.model.load_state_dict(best_state_dict)
+            logger.info(
+                "Restore bobot model DeepMF dari epoch dengan val RMSE terbaik "
+                "(%.4f) -- bukan otomatis model epoch terakhir.",
+                best_val_rmse,
+            )
 
     @torch.no_grad()
     def evaluate_rmse(self, dataset: InteractionDataset) -> float:

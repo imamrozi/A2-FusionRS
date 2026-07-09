@@ -69,6 +69,7 @@ cbf_clustering:
   method: "kmeans"
   k_selection: "elbow"
   feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 20                # diturunkan dari 50 -- subset kecil, item lebih sedikit
 
 fusion_baseline:
   method: "nmf_decision_tree"
