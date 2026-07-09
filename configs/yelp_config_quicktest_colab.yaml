@@ -22,7 +22,7 @@ experiment:
   domain: "restaurant"
 
 data:
-  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/yelp_subset_5k.csv"
+  raw_path: "/content/drive/MyDrive/a2fusionrs/data/raw/yelp_subset_5k.csv"
   business_attributes_required: ["business_categories", "business_stars", "business_city"]
   min_reviews_per_user: 3
   min_reviews_per_item: 3
@@ -33,7 +33,7 @@ split:
   val_ratio: 0.1
   test_ratio: 0.1
   cold_start_holdout: true
-  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/yelp_restaurant_quicktest"
+  output_dir: "/content/drive/MyDrive/a2fusionrs/data/splits/yelp_restaurant_quicktest"
 
 preprocessing:
   lowercase: true
@@ -47,11 +47,11 @@ sentiment_baseline:
   mode: "global"
   optimizer: "AdamW"
   learning_rate: 1.0e-5
-  # Batch size bisa dinaikkan di Colab dengan GPU (T4/L4/A100) dibanding
-  # versi CPU lokal -- 8 tetap aman sebagai default awal, naikkan ke 16/32
-  # setelah smoke test pertama lolos dan Anda cek memori GPU masih longgar
-  # (!nvidia-smi).
-  batch_size: 8
+  # Dinaikkan dari 8 (versi CPU lokal) ke 32 -- aman untuk GPU T4/L4 dengan
+  # max_seq_length=128. Kalau muncul CUDA out of memory, turunkan kembali
+  # ke 16, atau naikkan lagi ke 64 kalau memakai A100 dan !nvidia-smi
+  # menunjukkan memori masih longgar.
+  batch_size: 32
   epochs: 1
   max_grad_norm: 1.0
 
@@ -84,5 +84,5 @@ evaluation:
 logging:
   # Checkpoint WAJIB ke Drive (bukan /content/... lokal), karena session
   # storage Colab hilang total saat runtime disconnect.
-  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/yelp_restaurant_quicktest"
+  checkpoint_dir: "/content/drive/MyDrive/a2fusionrs/checkpoints/yelp_restaurant_quicktest"
   save_every_stage: true

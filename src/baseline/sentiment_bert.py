@@ -68,27 +68,34 @@ def derive_sentiment_label(stars: float) -> int:
 
 
 class ReviewSentimentDataset(Dataset):
+    """Dataset dengan PRE-TOKENISASI (batch, sekali di __init__), bukan
+    tokenisasi per-sampel di __getitem__. Perubahan ini penting untuk
+    kecepatan di GPU: tanpa pre-tokenisasi, CPU jadi bottleneck karena
+    tokenizer dipanggil satu-per-satu setiap kali DataLoader mengambil
+    sampel, sementara GPU menunggu idle -- terutama terasa di Colab
+    dengan GPU cepat (T4/L4/A100) tapi CPU host yang biasa-biasa saja.
+    """
+
     def __init__(self, texts: list[str], labels: list[int], tokenizer, max_length: int = 512):
-        self.texts = texts
-        self.labels = labels
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-
-    def __len__(self) -> int:
-        return len(self.texts)
-
-    def __getitem__(self, idx: int):
-        encoding = self.tokenizer(
-            self.texts[idx],
+        encodings = tokenizer(
+            texts,
             truncation=True,
             padding="max_length",
-            max_length=self.max_length,
+            max_length=max_length,
             return_tensors="pt",
         )
+        self.input_ids = encodings["input_ids"]
+        self.attention_mask = encodings["attention_mask"]
+        self.labels = torch.tensor(labels, dtype=torch.long)
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
+    def __getitem__(self, idx: int):
         return {
-            "input_ids": encoding["input_ids"].squeeze(0),
-            "attention_mask": encoding["attention_mask"].squeeze(0),
-            "label": torch.tensor(self.labels[idx], dtype=torch.long),
+            "input_ids": self.input_ids[idx],
+            "attention_mask": self.attention_mask[idx],
+            "label": self.labels[idx],
         }
 
 
@@ -100,6 +107,10 @@ class SentimentBertConfig:
     learning_rate: float = 1e-5
     epochs: int = 3
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    # --- Opsi khusus percepatan di GPU (Colab) ---
+    num_workers: int = 2          # parallel data loading; set 0 jika di Windows lokal tanpa GPU
+    pin_memory: bool = torch.cuda.is_available()
+    use_amp: bool = torch.cuda.is_available()  # mixed precision (fp16) -- speedup ~1.5-2x di T4/L4/A100
 
 
 class GlobalSentimentBERT:
@@ -107,11 +118,25 @@ class GlobalSentimentBERT:
 
     def __init__(self, config: SentimentBertConfig | None = None):
         self.config = config or SentimentBertConfig()
-        logger.info("Menggunakan device: %s", self.config.device)
+        logger.info(
+            "Menggunakan device: %s (AMP=%s, num_workers=%d)",
+            self.config.device,
+            self.config.use_amp,
+            self.config.num_workers,
+        )
+        if self.config.device == "cuda":
+            # cudnn.benchmark mempercepat training dengan mencari algoritma
+            # konvolusi/matmul tercepat untuk ukuran input yang konsisten
+            # (semua batch di sini punya max_length yang sama karena padding
+            # "max_length", jadi aman diaktifkan -- tidak ada overhead
+            # re-benchmark berulang akibat ukuran input yang berubah-ubah).
+            torch.backends.cudnn.benchmark = True
+
         self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(
             self.config.model_name, num_labels=2
         ).to(self.config.device)
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.config.use_amp)
 
     def fit(self, train_df: pd.DataFrame, val_df: pd.DataFrame | None = None) -> None:
         train_texts = train_df["text_bert"].tolist()
@@ -121,7 +146,11 @@ class GlobalSentimentBERT:
             train_texts, train_labels, self.tokenizer, self.config.max_length
         )
         train_loader = DataLoader(
-            train_dataset, batch_size=self.config.batch_size, shuffle=True
+            train_dataset,
+            batch_size=self.config.batch_size,
+            shuffle=True,
+            num_workers=self.config.num_workers,
+            pin_memory=self.config.pin_memory,
         )
 
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.config.learning_rate)
@@ -131,7 +160,7 @@ class GlobalSentimentBERT:
         )
 
         logger.info(
-            "Mulai training: %d baris, %d batch/epoch, %d epoch (device=%s). "
+            "Mulai training: %d baris, %d batch/epoch, %d epoch (device=%s, AMP=%s). "
             "Progress per-batch akan tampil di bawah -- jika device='cpu' dan "
             "tidak ada progress bar bergerak sama sekali dalam beberapa menit, "
             "kemungkinan proses benar-benar hang, bukan sekadar lambat.",
@@ -139,6 +168,7 @@ class GlobalSentimentBERT:
             len(train_loader),
             self.config.epochs,
             self.config.device,
+            self.config.use_amp,
         )
 
         self.model.train()
@@ -150,19 +180,29 @@ class GlobalSentimentBERT:
                 unit="batch",
             )
             for batch in progress_bar:
-                optimizer.zero_grad()
-                input_ids = batch["input_ids"].to(self.config.device)
-                attention_mask = batch["attention_mask"].to(self.config.device)
-                labels = batch["label"].to(self.config.device)
+                optimizer.zero_grad(set_to_none=True)
+                input_ids = batch["input_ids"].to(self.config.device, non_blocking=True)
+                attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=True)
+                labels = batch["label"].to(self.config.device, non_blocking=True)
 
-                outputs = self.model(
-                    input_ids=input_ids, attention_mask=attention_mask, labels=labels
-                )
-                loss = outputs.loss
-                loss.backward()
+                # Mixed precision (autocast) -- forward pass dihitung dalam
+                # fp16 (di GPU Tensor Core seperti T4/L4/A100) untuk speedup,
+                # GradScaler menangani skala gradien agar tidak underflow.
+                # Otomatis no-op (setara precision biasa) kalau use_amp=False
+                # atau device='cpu'.
+                with torch.autocast(device_type="cuda", enabled=self.config.use_amp):
+                    outputs = self.model(
+                        input_ids=input_ids, attention_mask=attention_mask, labels=labels
+                    )
+                    loss = outputs.loss
+
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                optimizer.step()
+                self.scaler.step(optimizer)
+                self.scaler.update()
                 scheduler.step()
+
                 epoch_loss += loss.item()
                 progress_bar.set_postfix(loss=f"{loss.item():.4f}")
 
@@ -181,14 +221,21 @@ class GlobalSentimentBERT:
         dataset = ReviewSentimentDataset(
             texts, [0] * len(texts), self.tokenizer, self.config.max_length
         )
-        loader = DataLoader(dataset, batch_size=self.config.batch_size, shuffle=False)
+        loader = DataLoader(
+            dataset,
+            batch_size=self.config.batch_size,
+            shuffle=False,
+            num_workers=self.config.num_workers,
+            pin_memory=self.config.pin_memory,
+        )
 
         probs = []
         for batch in loader:
-            input_ids = batch["input_ids"].to(self.config.device)
-            attention_mask = batch["attention_mask"].to(self.config.device)
-            outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-            batch_probs = torch.softmax(outputs.logits, dim=-1)[:, 1]
+            input_ids = batch["input_ids"].to(self.config.device, non_blocking=True)
+            attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=True)
+            with torch.autocast(device_type="cuda", enabled=self.config.use_amp):
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+            batch_probs = torch.softmax(outputs.logits.float(), dim=-1)[:, 1]
             probs.append(batch_probs.cpu().numpy())
         return np.concatenate(probs)
 
