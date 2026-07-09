@@ -1,0 +1,88 @@
+# configs/yelp_config_quicktest_colab.yaml
+#
+# Versi Colab dari yelp_config_quicktest.yaml -- HANYA beda di bagian path
+# (data.raw_path, split.output_dir, logging.checkpoint_dir), yang menunjuk
+# langsung ke Google Drive (BUKAN symlink, lihat diskusi sebelumnya).
+#
+# PENTING -- SESUAIKAN PATH INI DULU:
+# Path di bawah mengasumsikan struktur folder Drive:
+#   /content/drive/MyDrive/a2fusionrs/data/raw/yelp_subset_5k.csv
+# Kalau struktur folder Drive Anda berbeda (nama folder lain, lokasi lain),
+# ganti semua path yang diawali "/content/drive/MyDrive/a2fusionrs/" di
+# bawah ini sesuai lokasi riil Anda. Cek dulu dengan:
+#   !find /content/drive/MyDrive -maxdepth 3 -iname "data" -type d
+#
+# Jangan lupa mount Drive dulu di notebook sebelum menjalankan pipeline:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+experiment:
+  name: "yelp_quicktest_smoke_run_colab"
+  seed: 42
+  domain: "restaurant"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/yelp_subset_5k.csv"
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 3
+  min_reviews_per_item: 3
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/yelp_restaurant_quicktest"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  # Batch size bisa dinaikkan di Colab dengan GPU (T4/L4/A100) dibanding
+  # versi CPU lokal -- 8 tetap aman sebagai default awal, naikkan ke 16/32
+  # setelah smoke test pertama lolos dan Anda cek memori GPU masih longgar
+  # (!nvidia-smi).
+  batch_size: 8
+  epochs: 1
+  max_grad_norm: 1.0
+
+deepmf:
+  embedding_dim: 32
+  hidden_layers: [64, 32, 16]
+  dropout: 0.3
+  batch_size: 64
+  learning_rate: 0.001
+  negative_sampling_ratio: 4
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  nmf_components: 5
+  dt_max_depth: 5
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [3, 5]
+  n_seeds: 1
+  significance_test: "wilcoxon"
+
+logging:
+  # Checkpoint WAJIB ke Drive (bukan /content/... lokal), karena session
+  # storage Colab hilang total saat runtime disconnect.
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/yelp_restaurant_quicktest"
+  save_every_stage: true
