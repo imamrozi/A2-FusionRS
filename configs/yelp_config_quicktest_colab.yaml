@@ -22,7 +22,7 @@ experiment:
   domain: "restaurant"
 
 data:
-  raw_path: "/content/drive/MyDrive/a2fusionrs/data/raw/yelp_subset_5k.csv"
+  raw_path: "/content/drive/MyDrive/PHD-STUDENTS/Code/A2-FusionRS/data/raw/yelp_subset_5k.csv"
   business_attributes_required: ["business_categories", "business_stars", "business_city"]
   min_reviews_per_user: 3
   min_reviews_per_item: 3
@@ -33,7 +33,7 @@ split:
   val_ratio: 0.1
   test_ratio: 0.1
   cold_start_holdout: true
-  output_dir: "/content/drive/MyDrive/a2fusionrs/data/splits/yelp_restaurant_quicktest"
+  output_dir: "/content/drive/MyDrive/PHD-STUDENTS/Code/A2-FusionRS/data/splits/yelp_restaurant_quicktest"
 
 preprocessing:
   lowercase: true
@@ -84,5 +84,5 @@ evaluation:
 logging:
   # Checkpoint WAJIB ke Drive (bukan /content/... lokal), karena session
   # storage Colab hilang total saat runtime disconnect.
-  checkpoint_dir: "/content/drive/MyDrive/a2fusionrs/checkpoints/yelp_restaurant_quicktest"
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENTS/Code/A2-FusionRS/checkpoints/yelp_restaurant_quicktest"
   save_every_stage: true
