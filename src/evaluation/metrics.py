@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import yaml
 from scipy import stats
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
@@ -118,6 +119,45 @@ def aggregate_multi_seed_results(results: list[RunResult]) -> pd.DataFrame:
     metric_cols = [c for c in df.columns if c not in ("model_name", "domain", "seed")]
     summary = df.groupby(["model_name", "domain"])[metric_cols].agg(["mean", "std"])
     return summary
+
+
+def save_results_yaml(path: str | Path, results_summary: dict, config: dict | None = None) -> None:
+    """Simpan hasil evaluasi ke YAML dengan 2 pengaman, dipanggil identik oleh
+    run_baseline.py, run_baseline_absa.py, dan run_classical_cf.py:
+
+    1. WARNING eksplisit kalau path ini akan MENIMPA hasil yang sudah ada
+       (log RMSE lama vs baru). Sebelum ada ini, penimpaan terjadi SENYAP --
+       pernah kejadian nyata: baseline_reimpl_restaurant_seed42.yaml hasil
+       RMSE=0.6906 tertimpa tanpa jejak oleh run eksploratif berikutnya
+       (uji coba negative_sampling), dan baru ketahuan belakangan karena
+       angkanya sudah beda tanpa ada log peringatan sama sekali.
+    2. Snapshot config LENGKAP disertakan (field `config_snapshot`) kalau
+       `config` diberikan -- supaya hasil bisa diaudit ulang nanti (hyper-
+       parameter apa yang menghasilkan angka ini) tanpa perlu menebak dari
+       nama file log yang mungkin disimpan manual atau lupa disimpan.
+    """
+    path = Path(path)
+    if path.exists():
+        try:
+            with open(path) as f:
+                old = yaml.safe_load(f) or {}
+            logger.warning(
+                "MENIMPA hasil yang sudah ada di %s! RMSE lama=%s -> RMSE baru=%s. "
+                "Kalau ini tidak disengaja, salin dulu file lama sebelum lanjut.",
+                path,
+                old.get("rmse", "?"),
+                results_summary.get("rmse", "?"),
+            )
+        except Exception:
+            logger.warning("MENIMPA hasil yang sudah ada di %s (file lama tidak terbaca).", path)
+
+    if config is not None:
+        results_summary = {**results_summary, "config_snapshot": config}
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        yaml.safe_dump(results_summary, f, allow_unicode=True)
+    logger.info("Hasil evaluasi disimpan ke %s", path)
 
 
 def save_predictions(path: str | Path, test_df: pd.DataFrame, y_pred: np.ndarray) -> None:

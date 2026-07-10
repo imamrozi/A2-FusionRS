@@ -52,6 +52,7 @@ from src.evaluation.metrics import (
     precision_recall_ndcg_at_k,
     sanity_check_rmse,
     save_predictions,
+    save_results_yaml,
 )
 from src.preprocessing import TextPreprocessor
 from src.split_generator import UserBasedSplitGenerator
@@ -392,9 +393,7 @@ def run_pipeline(config: dict) -> None:
         "aspect_coverage": coverage_report,
         "notes": notes_concat if absa_mode == "concat" else notes_mean,
     }
-    with open(results_path, "w") as f:
-        yaml.safe_dump(results_summary, f, allow_unicode=True)
-    logger.info("Hasil evaluasi ABSA disimpan ke %s", results_path)
+    save_results_yaml(results_path, results_summary, config=config)
 
     predictions_path = results_dir / f"predictions_{results_path.stem}.csv"
     save_predictions(predictions_path, test_df, test_final_preds)

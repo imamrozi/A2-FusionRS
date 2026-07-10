@@ -35,6 +35,7 @@ from src.evaluation.metrics import (
     precision_recall_ndcg_at_k,
     sanity_check_rmse,
     save_predictions,
+    save_results_yaml,
 )
 from src.split_generator import UserBasedSplitGenerator
 
@@ -135,9 +136,7 @@ def run_one_algorithm(algorithm: str, config: dict, train_df, test_df) -> None:
             "seperti baseline_reimpl_*.yaml -- lihat run_baseline.py."
         ),
     }
-    with open(results_path, "w") as f:
-        yaml.safe_dump(results_summary, f, allow_unicode=True)
-    logger.info("Hasil %s disimpan ke %s", algorithm, results_path)
+    save_results_yaml(results_path, results_summary, config=config)
 
     predictions_path = results_dir / f"predictions_{results_path.stem}.csv"
     save_predictions(predictions_path, test_df, test_preds)

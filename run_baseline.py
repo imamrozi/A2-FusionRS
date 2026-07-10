@@ -44,6 +44,7 @@ from src.evaluation.metrics import (
     precision_recall_ndcg_at_k,
     sanity_check_rmse,
     save_predictions,
+    save_results_yaml,
 )
 from src.preprocessing import TextPreprocessor
 from src.split_generator import UserBasedSplitGenerator
@@ -341,9 +342,7 @@ def run_pipeline(config: dict) -> None:
             "test set (bukan full-catalog) -- lihat komentar di run_baseline.py"
         ),
     }
-    with open(results_path, "w") as f:
-        yaml.safe_dump(results_summary, f, allow_unicode=True)
-    logger.info("Hasil evaluasi disimpan ke %s", results_path)
+    save_results_yaml(results_path, results_summary, config=config)
 
     # Prediksi per-sampel (review_id, y_true, y_pred, squared_error) -- data
     # mentah untuk uji signifikansi Wilcoxon antar model nanti (lihat
