@@ -1,0 +1,88 @@
+# configs/yelp_config_absa_colab.yaml
+#
+# Versi Colab dari yelp_config_absa.yaml -- path menunjuk ke Google Drive,
+# SAMA PERSIS dengan yelp_config_colab.yaml (data.split.output_dir dan
+# logging.checkpoint_dir) supaya split & checkpoint model SA yang sudah
+# dihasilkan run_baseline.py (config Colab) otomatis ditemukan & dipakai
+# ulang oleh run_baseline_absa.py -- TIDAK ADA training BERT baru di sini.
+#
+# PRASYARAT: jalankan run_baseline.py --config configs/yelp_config_colab.yaml
+# SEKALI dulu sampai tahap 4 selesai.
+#
+# Mount Drive dulu di notebook sebelum menjalankan:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+experiment:
+  name: "yelp_absa_ablation_colab"
+  seed: 42
+  domain: "restaurant"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/yelp_training_set_review.csv"
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 5
+  min_reviews_per_item: 5
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/yelp_restaurant"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"          # nama section historis -- di ablasi ini nilainya DIGANTI oleh ABSA
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  batch_size: 32
+  epochs: 3
+  max_grad_norm: 1.0
+
+absa:
+  aggregation: "mean"
+  # aspect_keywords: null   # null/tidak diisi -> pakai DEFAULT_ASPECT_KEYWORDS[domain]
+
+deepmf:
+  embedding_dim: 128
+  hidden_layers: [256, 128, 64, 32]
+  dropout: 0.3
+  batch_size: 512
+  learning_rate: 0.001
+  negative_sampling_ratio: 0
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 50
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  nmf_components: 3
+  dt_max_depth: 10
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [5, 10, 20]
+  n_seeds: 3
+  significance_test: "wilcoxon"
+
+logging:
+  # SAMA PERSIS dengan yelp_config_colab.yaml -- supaya checkpoint model SA
+  # yang sudah ada (sentiment_bert/) otomatis ditemukan & dipakai ulang.
+  # Hasil tetap tersimpan ke file berbeda (absa_ablation_*.yaml, bukan
+  # baseline_reimpl_*.yaml) jadi tidak akan saling menimpa.
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/yelp_restaurant"
+  save_every_stage: true
