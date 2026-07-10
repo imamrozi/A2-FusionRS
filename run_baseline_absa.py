@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -136,15 +137,18 @@ def run_pipeline(config: dict) -> None:
         val_df["sentiment_score"] = val_df["review_id"].map(score_map)
         test_df["sentiment_score"] = test_df["review_id"].map(score_map)
     else:
-        logger.info(
-            "Menghitung skor ABSA untuk %d baris train + %d val + %d test...",
-            len(train_df),
-            len(val_df),
-            len(test_df),
-        )
-        train_df["sentiment_score"] = scorer.score_dataframe(train_df)
-        val_df["sentiment_score"] = scorer.score_dataframe(val_df)
-        test_df["sentiment_score"] = scorer.score_dataframe(test_df)
+        # Dipisah per-split (bukan 1 log block untuk train+val+test sekaligus)
+        # supaya progress terlihat jelas -- ABSA butuh beberapa kali lebih
+        # banyak panggilan ke BERT dibanding SA global (1x per aspek yang
+        # match per baris, lihat log "ABSA: ... panggilan teks" di bawah),
+        # jadi tahap ini bisa signifikan lebih lama dari yang diperkirakan.
+        for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+            logger.info("=== ABSA: menghitung skor untuk split '%s' (%d baris) ===", name, len(part_df))
+            t0 = time.time()
+            part_df["sentiment_score"] = scorer.score_dataframe(part_df)
+            logger.info(
+                "=== ABSA: split '%s' selesai dalam %.1f menit ===", name, (time.time() - t0) / 60
+            )
         logger.info("Skor ABSA selesai dihitung untuk semua split.")
 
         pd.concat(

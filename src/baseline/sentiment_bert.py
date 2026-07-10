@@ -216,7 +216,16 @@ class GlobalSentimentBERT:
     @torch.no_grad()
     def predict_proba(self, texts: list[str]) -> np.ndarray:
         """Return probabilitas kelas positif -- dipakai sebagai skor sentimen
-        global yang masuk ke fusion layer (bukan hanya label biner)."""
+        global yang masuk ke fusion layer (bukan hanya label biner).
+
+        Progress bar (tqdm) SENGAJA ditambahkan di sini -- tanpa ini, panggilan
+        dengan banyak teks (ratusan ribu, mis. dari absa_bert.py yang
+        memanggil predict_proba() dengan beberapa kali lipat teks per baris
+        dataset karena skor per-aspek) bisa terlihat seperti hang selama
+        puluhan menit tanpa output apa pun. Pernah terjadi: proses disconnect
+        sendiri di Colab (diduga idle-timeout krn tidak ada output baru),
+        BUKAN karena user menekan Ctrl+C.
+        """
         self.model.eval()
         dataset = ReviewSentimentDataset(
             texts, [0] * len(texts), self.tokenizer, self.config.max_length
@@ -230,7 +239,8 @@ class GlobalSentimentBERT:
         )
 
         probs = []
-        for batch in loader:
+        progress_bar = tqdm(loader, desc=f"Inference ({len(texts)} teks)", unit="batch")
+        for batch in progress_bar:
             input_ids = batch["input_ids"].to(self.config.device, non_blocking=True)
             attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=True)
             with torch.autocast(device_type="cuda", enabled=self.config.use_amp):

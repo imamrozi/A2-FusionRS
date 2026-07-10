@@ -151,6 +151,15 @@ class KeywordAspectSentimentScorer:
                     flat_texts.append(" ".join(matched_sentences))
                     flat_row_idx.append(row_idx)
 
+        avg_calls_per_row = len(flat_texts) / len(texts) if texts else 0.0
+        logger.info(
+            "ABSA: %d baris -> %d panggilan teks ke model SA (rata-rata %.2fx lipat "
+            "dibanding skor SA global, karena tiap aspek yang match discor terpisah). "
+            "Estimasi waktu proporsional dengan kelipatan ini -- lihat progress bar di bawah.",
+            len(texts),
+            len(flat_texts),
+            avg_calls_per_row,
+        )
         flat_scores = self.sentiment_model.predict_proba(flat_texts)
 
         per_row_scores: dict[int, list[float]] = defaultdict(list)
