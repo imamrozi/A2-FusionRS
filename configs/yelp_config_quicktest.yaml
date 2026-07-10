@@ -67,6 +67,19 @@ fusion_baseline:
   nmf_components: 3
   dt_max_depth: 5               # diturunkan dari 10 -- cegah overfit ekstrem pada subset kecil
 
+classical_cf:
+  algorithms: ["item_knn", "svd"]
+  item_knn:
+    knn_k: 10                   # diturunkan dari 40 -- subset kecil
+    knn_min_k: 1
+    knn_sim_name: "cosine"
+    knn_user_based: false
+  svd:
+    svd_n_factors: 20            # diturunkan dari 100 -- subset kecil
+    svd_n_epochs: 5               # diturunkan dari 20 -- smoke test cepat
+    svd_lr_all: 0.005
+    svd_reg_all: 0.02
+
 evaluation:
   metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
   k_values: [3, 5]              # diturunkan dari [5,10,20] -- subset kecil, K besar kurang bermakna

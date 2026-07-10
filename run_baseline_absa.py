@@ -1,22 +1,33 @@
 """
-run_baseline.py
+run_baseline_absa.py
 
-Entry point orkestrasi Fase 1: reimplementasi baseline Darraz et al. pada
-domain Yelp dengan protokol evaluasi yang ketat (held-out test set, tanpa
-leakage). Menjalankan seluruh pipeline: load -> split -> preprocess ->
-sentiment (global) -> DeepMF -> CBF clustering -> fusion NMF+DT -> evaluasi.
+Varian ablasi Fase 1: pipeline baseline Darraz et al. yang SAMA PERSIS
+(load -> split -> preprocess -> DeepMF -> CBF -> fusion NMF/DT -> evaluasi),
+TAPI stream sentimen GLOBAL (satu skor BERT per review) diganti skor
+ber-ASPEK (`src/a2fusionrs/absa_bert.py`, keyword-based, reuse model SA yang
+SUDAH di-checkpoint dari run_baseline.py -- TIDAK ADA training BERT baru di
+sini).
 
-PERINGATAN: script ini adalah skeleton orkestrasi. Sebelum dijalankan pada
-eksperimen sesungguhnya:
-1. Unduh dataset Yelp riil ke data/raw/ (lihat configs/yelp_config.yaml)
-2. Validasi asumsi label sentiment (lihat sentiment_bert.py) terhadap
-   detail metodologi baseline paper
-3. Jalankan dulu pada subset kecil (misal 5.000 baris) untuk memverifikasi
-   seluruh pipeline berjalan tanpa error sebelum full run yang memakan
-   compute budget Colab
+Ini duplikat run_baseline.py, HANYA tahap 4 yang beda -- tahap 1,3,5,6,7,8
+sengaja disalin verbatim (bukan di-refactor jadi pluggable) untuk meminimalkan
+risiko terhadap pipeline baseline yang sudah divalidasi & diperbaiki
+berkali-kali. Tahap 2 juga sedikit beda: split WAJIB sudah ada (load-only,
+tidak auto-generate), sama seperti run_classical_cf.py.
+
+Skor ABSA menggantikan kolom `sentiment_score` di SEMUA tempat pipeline
+memakainya (broad propagation) -- termasuk fitur `sentiment_agg` di CBF,
+bukan cuma input fusion. Ini keputusan desain yang disengaja (lihat
+plan/diskusi terkait): implementasi paling sederhana, ZERO perubahan ke
+cbf_clustering.py/fusion_nmf_dt.py, karena keduanya cuma baca nama kolom
+tanpa peduli asal skornya.
+
+PRASYARAT: jalankan run_baseline.py (config domain yang sama) SEKALI dulu
+sampai tahap 4 selesai, supaya checkpoint model SA (`sentiment_bert/`) ada.
+Script ini akan berhenti dengan error jelas kalau checkpoint belum ada --
+SENGAJA tidak fallback training baru.
 
 Usage:
-    python run_baseline.py --config configs/yelp_config.yaml
+    python run_baseline_absa.py --config configs/yelp_config_absa.yaml
 """
 
 from __future__ import annotations
@@ -30,15 +41,11 @@ import pandas as pd
 import torch
 import yaml
 
+from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
 from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
 from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
-from src.baseline.sentiment_bert import (
-    GlobalSentimentBERT,
-    SentimentBertConfig,
-    derive_sentiment_label,
-)
-from src.data_loader import YelpDatasetLoader
+from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
 from src.evaluation.metrics import (
     compute_rmse_mae,
     precision_recall_ndcg_at_k,
@@ -64,44 +71,20 @@ def run_pipeline(config: dict) -> None:
     data_cfg = config["data"]
     split_cfg = config["split"]
 
-    # Seed SEMUA sumber randomness (numpy + PyTorch), bukan cuma numpy --
-    # penting untuk protokol n_seeds=3 + uji signifikansi Wilcoxon di
-    # evaluation config: tanpa ini, hasil BERT/DeepMF tidak reproducible
-    # dan tidak benar-benar bervariasi mengikuti seed yang diminta.
     np.random.seed(exp_cfg["seed"])
     torch.manual_seed(exp_cfg["seed"])
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(exp_cfg["seed"])
 
-    # ---------- 1. Load data ----------
-    logger.info("=== Tahap 1: Memuat data ===")
-    loader = YelpDatasetLoader(data_cfg["raw_path"], domain=exp_cfg["domain"])
-    df = loader.load()
-    df = loader.filter_min_interactions(
-        df,
-        min_reviews_per_user=data_cfg["min_reviews_per_user"],
-        min_reviews_per_item=data_cfg["min_reviews_per_item"],
-    )
-    stats = loader.compute_stats(df)
-    logger.info("Statistik dataset: %s", stats)
+    # ---------- 1. Load data (TIDAK dipakai langsung -- split sudah final) --
+    # Tahap 1 baseline (load raw CSV) sengaja DILEWATI di sini: kita hanya
+    # perlu split yang sudah tersimpan, bukan raw dataset lagi.
 
-    # ---------- 2. Split ----------
-    logger.info("=== Tahap 2: Membuat/memuat split ===")
+    # ---------- 2. Split -- WAJIB sudah ada (load-only, sama spirit dengan
+    # run_classical_cf.py: JANGAN generate split baru untuk arm ini) ----------
+    logger.info("=== Tahap 2: Memuat split (WAJIB sudah ada) ===")
     split_output_dir = Path(split_cfg["output_dir"])
-    if (split_output_dir / "train.csv").exists():
-        logger.info("Split sudah ada, memuat dari %s", split_output_dir)
-        splits = UserBasedSplitGenerator.load(split_output_dir)
-    else:
-        generator = UserBasedSplitGenerator(
-            train_ratio=split_cfg["train_ratio"],
-            val_ratio=split_cfg["val_ratio"],
-            test_ratio=split_cfg["test_ratio"],
-            seed=exp_cfg["seed"],
-            cold_start_holdout=split_cfg["cold_start_holdout"],
-        )
-        splits = generator.split(df)
-        generator.save(splits, split_output_dir)
-
+    splits = UserBasedSplitGenerator.load(split_output_dir)
     train_df, val_df, test_df = splits["train"], splits["val"], splits["test"]
 
     # ---------- 3. Preprocessing ----------
@@ -111,19 +94,8 @@ def run_pipeline(config: dict) -> None:
     val_df = preprocessor.preprocess_dataframe(val_df)
     test_df = preprocessor.preprocess_dataframe(test_df)
 
-    # ---------- 4. Sentiment label (derive dari rating, filter netral) ----------
-    logger.info("=== Tahap 4: Derivasi label sentiment & training SA global ===")
-    for name, part in [("train", train_df), ("val", val_df)]:
-        before = len(part)
-        part = part[part["stars"] != 3].copy()
-        part["sentiment_label"] = part["stars"].apply(derive_sentiment_label)
-        logger.info(
-            "%s: %d baris dibuang (rating netral=3) dari %d total", name, before - len(part), before
-        )
-        if name == "train":
-            train_df_sa = part
-        else:
-            val_df_sa = part
+    # ---------- 4. ABSA (ganti SA global) ----------
+    logger.info("=== Tahap 4 (ABSA): Skor sentimen ber-aspek (ganti SA global) ===")
 
     sa_config = SentimentBertConfig(
         model_name=config["sentiment_baseline"]["model_name"],
@@ -133,49 +105,47 @@ def run_pipeline(config: dict) -> None:
         epochs=config["sentiment_baseline"]["epochs"],
     )
 
-    # Checkpoint tahap 4 -- tahap paling mahal (training BERT bisa berjam-jam).
-    # Kalau checkpoint sudah ada (mis. dari run sebelumnya yang sukses sampai
-    # tahap 4 tapi lalu gagal/disconnect di tahap 5-8), langsung load & skip
-    # training, JANGAN ulang dari nol.
+    # WAJIB checkpoint SA sudah ada dari run_baseline.py -- TIDAK training baru.
     sa_checkpoint_dir = Path(config["logging"]["checkpoint_dir"]) / "sentiment_bert"
-    if (sa_checkpoint_dir / "config.json").exists():
-        logger.info("Checkpoint SA ditemukan di %s -- memuat model, skip training.", sa_checkpoint_dir)
-        sa_model = GlobalSentimentBERT.load(str(sa_checkpoint_dir), sa_config)
-    else:
-        sa_model = GlobalSentimentBERT(sa_config)
-        sa_model.fit(train_df_sa, val_df_sa)
-        sa_checkpoint_dir.mkdir(parents=True, exist_ok=True)
-        sa_model.save(str(sa_checkpoint_dir))
-
-    # Skor sentimen (probabilitas) untuk SEMUA baris (train/val/test),
-    # dipakai sebagai fitur numerik ke fusion layer -- bukan label biner.
-    # Di-cache ke file di sebelah checkpoint model SA -- inference forward-only
-    # ini tetap makan ~15-20 menit untuk ratusan ribu baris meski model SA-nya
-    # sendiri sudah di-skip training via checkpoint, jadi tanpa cache ini,
-    # setiap eksperimen ulang di tahap 5+ (mis. tuning DeepMF/CBF/fusion)
-    # SELALU menunggu ~20 menit lagi tanpa perlu. Hapus sa_checkpoint_dir
-    # untuk invalidate keduanya (model + cache skor) sekaligus.
-    sentiment_scores_cache = sa_checkpoint_dir / "sentiment_scores.csv"
-    if sentiment_scores_cache.exists():
-        logger.info(
-            "Cache sentiment_score ditemukan di %s -- skip inference, langsung load.",
-            sentiment_scores_cache,
+    if not (sa_checkpoint_dir / "config.json").exists():
+        raise FileNotFoundError(
+            f"Checkpoint model SA tidak ditemukan di {sa_checkpoint_dir}. "
+            "run_baseline_absa.py TIDAK melakukan training BERT baru -- "
+            "jalankan run_baseline.py (config domain yang sama, logging."
+            "checkpoint_dir yang sama) sampai tahap 4 selesai terlebih dahulu."
         )
-        score_map = pd.read_csv(sentiment_scores_cache).set_index("review_id")["sentiment_score"]
+    logger.info("Memuat model SA dari checkpoint %s (dipakai ulang, tanpa training baru).", sa_checkpoint_dir)
+    sa_model = GlobalSentimentBERT.load(str(sa_checkpoint_dir), sa_config)
+
+    absa_config = ABSAConfig(
+        domain=exp_cfg["domain"],
+        aggregation=config.get("absa", {}).get("aggregation", "mean"),
+    )
+    scorer = KeywordAspectSentimentScorer(sa_model, absa_config)
+
+    # Cache ke file BEDA NAMA dari sentiment_scores.csv milik run_baseline.py,
+    # supaya tidak bentrok/menimpa cache skor SA global di folder yang sama.
+    absa_scores_cache = sa_checkpoint_dir / "absa_sentiment_scores.csv"
+    if absa_scores_cache.exists():
+        logger.info(
+            "Cache skor ABSA ditemukan di %s -- skip inference, langsung load.",
+            absa_scores_cache,
+        )
+        score_map = pd.read_csv(absa_scores_cache).set_index("review_id")["sentiment_score"]
         train_df["sentiment_score"] = train_df["review_id"].map(score_map)
         val_df["sentiment_score"] = val_df["review_id"].map(score_map)
         test_df["sentiment_score"] = test_df["review_id"].map(score_map)
     else:
         logger.info(
-            "Menghitung sentiment_score (inference) untuk %d baris train + %d val + %d test...",
+            "Menghitung skor ABSA untuk %d baris train + %d val + %d test...",
             len(train_df),
             len(val_df),
             len(test_df),
         )
-        train_df["sentiment_score"] = sa_model.predict_proba(train_df["text_bert"].tolist())
-        val_df["sentiment_score"] = sa_model.predict_proba(val_df["text_bert"].tolist())
-        test_df["sentiment_score"] = sa_model.predict_proba(test_df["text_bert"].tolist())
-        logger.info("sentiment_score selesai dihitung untuk semua split.")
+        train_df["sentiment_score"] = scorer.score_dataframe(train_df)
+        val_df["sentiment_score"] = scorer.score_dataframe(val_df)
+        test_df["sentiment_score"] = scorer.score_dataframe(test_df)
+        logger.info("Skor ABSA selesai dihitung untuk semua split.")
 
         pd.concat(
             [
@@ -183,10 +153,15 @@ def run_pipeline(config: dict) -> None:
                 val_df[["review_id", "sentiment_score"]],
                 test_df[["review_id", "sentiment_score"]],
             ]
-        ).to_csv(sentiment_scores_cache, index=False)
-        logger.info("sentiment_score disimpan ke cache %s.", sentiment_scores_cache)
+        ).to_csv(absa_scores_cache, index=False)
+        logger.info("Skor ABSA disimpan ke cache %s.", absa_scores_cache)
 
-    # ---------- 5. DeepMF ----------
+    # Diagnostik cakupan aspek -- WAJIB dilog & disimpan (bukan nice-to-have),
+    # cakupan rendah = ablasi kurang bermakna (skor konvergen ke fallback lagi).
+    coverage_report = scorer.aspect_coverage_report(pd.concat([train_df, val_df, test_df], ignore_index=True))
+    logger.info("Cakupan aspek ABSA: %s", coverage_report)
+
+    # ---------- 5. DeepMF (verbatim sama dengan run_baseline.py) ----------
     logger.info("=== Tahap 5: Training DeepMF ===")
     all_users = pd.concat([train_df["user_id"], val_df["user_id"], test_df["user_id"]]).unique()
     all_items = pd.concat(
@@ -219,7 +194,8 @@ def run_pipeline(config: dict) -> None:
     deepmf_trainer = DeepMFTrainer(len(all_users), len(all_items), deepmf_config)
     deepmf_trainer.fit(train_interactions, val_interactions)
 
-    # ---------- 6. CBF Clustering ----------
+    # ---------- 6. CBF Clustering (verbatim -- otomatis pakai sentiment_score
+    # ABSA karena build_item_dataframe() baca kolom itu apa adanya) ----------
     logger.info("=== Tahap 6: Content-Based Filtering & Clustering ===")
     full_df_for_items = pd.concat([train_df, val_df, test_df], ignore_index=True)
 
@@ -239,7 +215,7 @@ def run_pipeline(config: dict) -> None:
         cbf_config.method,
     )
 
-    # ---------- 7. Fusion NMF + DecisionTree ----------
+    # ---------- 7. Fusion NMF + DecisionTree (verbatim) ----------
     logger.info("=== Tahap 7: Fusion NMF + DecisionTreeRegressor ===")
 
     rating_scale = (1.0, 5.0)
@@ -282,29 +258,18 @@ def run_pipeline(config: dict) -> None:
     sanity_check_rmse(rmse, rating_scale)
 
     logger.info("=" * 60)
-    logger.info("HASIL BASELINE REIMPLEMENTATION (domain: %s)", exp_cfg["domain"])
+    logger.info("HASIL ABLASI ABSA (domain: %s)", exp_cfg["domain"])
     logger.info("RMSE: %.4f", rmse)
     logger.info("MAE : %.4f", mae)
     logger.info("=" * 60)
 
-    # Ranking metrics (Precision/Recall/NDCG@K) -- SIMPLIFIKASI YANG PERLU
-    # DICATAT: candidate set per user dibatasi hanya pada item yang muncul
-    # di test set (bukan seluruh katalog item), karena ranking terhadap
-    # seluruh katalog jutaan item tidak feasible dihitung untuk setiap user
-    # pada tahap baseline ini. Ini praktik umum evaluasi offline RS skala
-    # menengah, TAPI harus dinyatakan eksplisit sebagai batasan di bagian
-    # metodologi/limitasi manuskrip -- angka Precision/Recall/NDCG absolut
-    # tidak boleh dibandingkan langsung dengan studi lain yang memakai
-    # protokol full-catalog ranking.
     logger.info("Menghitung ranking metrics (Precision/Recall/NDCG@K)...")
-
     test_df_eval = test_df.copy()
     test_df_eval["pred_score"] = test_final_preds
 
-    relevance_threshold = 4.0  # rating >=4 dianggap "relevant", konsisten dgn literatur umum
+    relevance_threshold = 4.0
     ranked_items_per_user: dict = {}
     relevant_items_per_user: dict = {}
-
     for user_id, group in test_df_eval.groupby("user_id"):
         ranked = group.sort_values("pred_score", ascending=False)["business_id"].tolist()
         ranked_items_per_user[user_id] = ranked
@@ -315,19 +280,16 @@ def run_pipeline(config: dict) -> None:
     precision_k, recall_k, ndcg_k = precision_recall_ndcg_at_k(
         ranked_items_per_user, relevant_items_per_user, k_values
     )
-
     logger.info("Precision@K: %s", precision_k)
     logger.info("Recall@K   : %s", recall_k)
     logger.info("NDCG@K     : %s", ndcg_k)
 
-    # Simpan hasil ke file untuk dibandingkan dengan model lain (SVD, NCF,
-    # DeepFM, A2-FusionRS, dan varian ablasi) yang akan dijalankan terpisah.
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_path = results_dir / f"baseline_reimpl_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
+    results_path = results_dir / f"absa_ablation_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
-        "model_name": "baseline_reimplementation_darraz_et_al",
+        "model_name": "baseline_darraz_with_absa_sentiment_ablation",
         "domain": exp_cfg["domain"],
         "seed": exp_cfg["seed"],
         "n_test_samples": int(len(test_df)),
@@ -336,33 +298,36 @@ def run_pipeline(config: dict) -> None:
         "precision_at_k": {int(k): v for k, v in precision_k.items()},
         "recall_at_k": {int(k): v for k, v in recall_k.items()},
         "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
+        "aspect_coverage": coverage_report,
         "notes": (
-            "Ranking metrics dihitung dengan candidate set terbatas pada item "
-            "test set (bukan full-catalog) -- lihat komentar di run_baseline.py"
+            "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+"
+            "NMF/DT, tidak diubah), sentiment_score diganti skor ABSA "
+            "keyword-based (bukan SA global) di SEMUA tempat pipeline "
+            "memakainya (termasuk sentiment_agg di CBF). Ranking metrics "
+            "pakai candidate set terbatas ke item test set -- lihat "
+            "run_baseline.py."
         ),
     }
     with open(results_path, "w") as f:
         yaml.safe_dump(results_summary, f, allow_unicode=True)
-    logger.info("Hasil evaluasi disimpan ke %s", results_path)
+    logger.info("Hasil evaluasi ABSA disimpan ke %s", results_path)
 
-    # Prediksi per-sampel (review_id, y_true, y_pred, squared_error) -- data
-    # mentah untuk uji signifikansi Wilcoxon antar model nanti (lihat
-    # save_predictions() di src/evaluation/metrics.py).
     predictions_path = results_dir / f"predictions_{results_path.stem}.csv"
     save_predictions(predictions_path, test_df, test_final_preds)
 
     logger.info(
-        "Pipeline baseline reimplementation SELESAI. Bandingkan RMSE=%.4f "
-        "ini dengan angka yang dilaporkan baseline paper (0.01-0.02) -- jika "
-        "jauh berbeda, dokumentasikan sebagai temuan metodologis di bagian "
-        "Discussion (lihat diskusi anomali RMSE sebelumnya).",
+        "Pipeline ablasi ABSA SELESAI. RMSE=%.4f -- bandingkan dengan "
+        "baseline_reimpl_%s_seed%d.yaml (SA global) untuk menilai efek "
+        "aspect-awareness pada sentiment_score.",
         rmse,
+        exp_cfg["domain"],
+        exp_cfg["seed"],
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Jalankan pipeline reimplementasi baseline")
-    parser.add_argument("--config", type=str, default="configs/yelp_config.yaml")
+    parser = argparse.ArgumentParser(description="Jalankan varian ablasi ABSA dari pipeline baseline")
+    parser.add_argument("--config", type=str, default="configs/yelp_config_absa.yaml")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

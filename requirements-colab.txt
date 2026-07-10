@@ -14,6 +14,13 @@ nltk>=3.8.1,<4.0.0
 PyYAML>=6.0,<7.0
 tqdm>=4.66.0
 
+# --- Baseline CF ringan (Item-KNN, SVD) untuk pembanding vs DeepMF ---
+# scikit-surprise TIDAK preinstall di Colab (beda dari torch/pandas/numpy).
+# C-extension package -- kalau instalasi gagal karena ABI mismatch dengan
+# numpy>=2.0 di runtime Colab terbaru, cek versi numpy dulu (!pip show numpy)
+# sebelum lapor sebagai bug di kode kita.
+scikit-surprise>=1.1.3,<2.0.0
+
 # ============================================================
 # SETELAH INSTALASI, jalankan di cell terpisah untuk resource NLTK:
 #

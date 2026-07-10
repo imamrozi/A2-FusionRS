@@ -90,6 +90,22 @@ fusion_baseline:
   nmf_components: 3
   dt_max_depth: 10
 
+# Baseline CF ringan (Item-KNN, SVD) -- pembanding di luar reimplementasi
+# hybrid, TIDAK terintegrasi ke fusion. Jalankan via run_classical_cf.py,
+# pakai split yang sama (data.split di atas).
+classical_cf:
+  algorithms: ["item_knn", "svd"]
+  item_knn:
+    knn_k: 40
+    knn_min_k: 1
+    knn_sim_name: "cosine"
+    knn_user_based: false   # false = item-based (Item-KNN)
+  svd:
+    svd_n_factors: 100
+    svd_n_epochs: 20
+    svd_lr_all: 0.005
+    svd_reg_all: 0.02
+
 evaluation:
   metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
   k_values: [5, 10, 20]

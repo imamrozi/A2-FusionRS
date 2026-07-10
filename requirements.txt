@@ -17,6 +17,14 @@ scipy>=1.10.0,<2.0.0
 # --- Machine learning klasik (DeepMF training loop, CBF clustering, fusion NMF+DT) ---
 scikit-learn>=1.3.0,<2.0.0
 
+# --- Baseline CF ringan (Item-KNN, SVD) untuk pembanding vs DeepMF ---
+# scikit-surprise adalah paket C-extension. Diverifikasi terinstal lancar di
+# venv lokal Windows (build tools sudah tersedia di mesin ini) -- kalau di
+# mesin lain gagal build, install Microsoft C++ Build Tools dulu. Nama
+# "CoClustering" di Table 8/9 paper Darraz et al. persis nama kelas di
+# library ini, indikasi kuat paper aslinya juga memakai surprise.
+scikit-surprise>=1.1.3,<2.0.0
+
 # --- Deep learning & NLP (SA-BERT baseline, tokenisasi) ---
 # CPU-only build direkomendasikan untuk laptop tanpa GPU -- lihat catatan
 # instalasi khusus torch di bawah, karena default `pip install torch` bisa

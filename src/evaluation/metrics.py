@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -22,12 +23,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class RunResult:
-    """Hasil satu run (satu seed) sebuah model, untuk agregasi multi-seed."""
+    """Hasil satu run (satu seed, satu domain) sebuah model, untuk agregasi
+    multi-seed. `domain` WAJIB diisi kalau model yang sama dijalankan pada
+    >1 domain (restoran & hotel) -- tanpa ini, aggregate_multi_seed_results()
+    akan salah menggabungkan hasil restoran+hotel jadi satu baris."""
 
     model_name: str
     seed: int
     rmse: float
     mae: float
+    domain: str = ""
     precision_at_k: dict[int, float] = field(default_factory=dict)
     recall_at_k: dict[int, float] = field(default_factory=dict)
     ndcg_at_k: dict[int, float] = field(default_factory=dict)
@@ -88,11 +93,19 @@ def precision_recall_ndcg_at_k(
 
 
 def aggregate_multi_seed_results(results: list[RunResult]) -> pd.DataFrame:
-    """Agregasi hasil multi-seed jadi mean +/- std per model, sesuai desain
-    ablasi (>=3 seed per skenario)."""
+    """Agregasi hasil multi-seed jadi mean +/- std per (model, domain), sesuai
+    desain ablasi (>=3 seed per skenario). Group by (model_name, domain) --
+    BUKAN model_name saja -- supaya hasil restoran & hotel dari model yang
+    sama tidak tercampur jadi satu baris."""
     rows = []
     for r in results:
-        row = {"model_name": r.model_name, "seed": r.seed, "rmse": r.rmse, "mae": r.mae}
+        row = {
+            "model_name": r.model_name,
+            "domain": r.domain,
+            "seed": r.seed,
+            "rmse": r.rmse,
+            "mae": r.mae,
+        }
         for k, v in r.precision_at_k.items():
             row[f"precision@{k}"] = v
         for k, v in r.recall_at_k.items():
@@ -102,9 +115,35 @@ def aggregate_multi_seed_results(results: list[RunResult]) -> pd.DataFrame:
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    metric_cols = [c for c in df.columns if c not in ("model_name", "seed")]
-    summary = df.groupby("model_name")[metric_cols].agg(["mean", "std"])
+    metric_cols = [c for c in df.columns if c not in ("model_name", "domain", "seed")]
+    summary = df.groupby(["model_name", "domain"])[metric_cols].agg(["mean", "std"])
     return summary
+
+
+def save_predictions(path: str | Path, test_df: pd.DataFrame, y_pred: np.ndarray) -> None:
+    """Simpan prediksi PER-SAMPEL (review_id, y_true, y_pred, squared_error)
+    ke CSV -- data mentah yang dibutuhkan `significance_test()` (Wilcoxon)
+    untuk membandingkan dua model secara berpasangan pada test set yang
+    SAMA persis. Tanpa ini, metrik agregat (RMSE/MAE) saja TIDAK CUKUP untuk
+    uji signifikansi -- harus run ulang semua skenario kalau baru dibutuhkan
+    belakangan. Dipanggil identik oleh run_baseline.py, run_baseline_absa.py,
+    dan run_classical_cf.py supaya formatnya konsisten lintas skenario.
+    """
+    out = pd.DataFrame(
+        {
+            "review_id": test_df["review_id"].values,
+            "user_id": test_df["user_id"].values,
+            "business_id": test_df["business_id"].values,
+            "y_true": test_df["stars"].values,
+            "y_pred": y_pred,
+        }
+    )
+    out["squared_error"] = (out["y_true"] - out["y_pred"]) ** 2
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out.to_csv(path, index=False)
+    logger.info("Prediksi per-sampel disimpan ke %s (untuk uji signifikansi nanti)", path)
 
 
 def significance_test(
