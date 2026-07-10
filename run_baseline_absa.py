@@ -123,42 +123,98 @@ def run_pipeline(config: dict) -> None:
         aggregation=config.get("absa", {}).get("aggregation", "mean"),
     )
     scorer = KeywordAspectSentimentScorer(sa_model, absa_config)
+    # mode "mean" (default): skor per-aspek dirata-rata jadi 1 kolom
+    # sentiment_score, drop-in pengganti SA global di SEMUA tempat (broad
+    # propagation, termasuk sentiment_agg CBF) -- lihat score_dataframe().
+    # mode "concat": skor per-aspek TANPA agregasi, dikirim sebagai vektor
+    # mentah ke Fusion (bukan 1 skalar) -- lihat score_dataframe_per_aspect()
+    # & tahap 7 di bawah. CBF tetap dapat 1 skor (rata-rata kolom aspek,
+    # DITURUNKAN dari hasil ini, bukan panggilan predict_proba() terpisah).
+    absa_mode = config.get("absa", {}).get("mode", "mean")
+    aspect_names = list(scorer.aspect_keywords.keys())
 
-    # Cache ke file BEDA NAMA dari sentiment_scores.csv milik run_baseline.py,
-    # supaya tidak bentrok/menimpa cache skor SA global di folder yang sama.
-    absa_scores_cache = sa_checkpoint_dir / "absa_sentiment_scores.csv"
-    if absa_scores_cache.exists():
-        logger.info(
-            "Cache skor ABSA ditemukan di %s -- skip inference, langsung load.",
-            absa_scores_cache,
-        )
-        score_map = pd.read_csv(absa_scores_cache).set_index("review_id")["sentiment_score"]
-        train_df["sentiment_score"] = train_df["review_id"].map(score_map)
-        val_df["sentiment_score"] = val_df["review_id"].map(score_map)
-        test_df["sentiment_score"] = test_df["review_id"].map(score_map)
-    else:
-        # Dipisah per-split (bukan 1 log block untuk train+val+test sekaligus)
-        # supaya progress terlihat jelas -- ABSA butuh beberapa kali lebih
-        # banyak panggilan ke BERT dibanding SA global (1x per aspek yang
-        # match per baris, lihat log "ABSA: ... panggilan teks" di bawah),
-        # jadi tahap ini bisa signifikan lebih lama dari yang diperkirakan.
-        for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
-            logger.info("=== ABSA: menghitung skor untuk split '%s' (%d baris) ===", name, len(part_df))
-            t0 = time.time()
-            part_df["sentiment_score"] = scorer.score_dataframe(part_df)
+    if absa_mode == "concat":
+        # Cache BEDA NAMA dari mode mean, supaya keduanya bisa hidup
+        # berdampingan di folder checkpoint yang sama tanpa saling menimpa.
+        absa_cache = sa_checkpoint_dir / "absa_aspect_scores.csv"
+        if absa_cache.exists():
             logger.info(
-                "=== ABSA: split '%s' selesai dalam %.1f menit ===", name, (time.time() - t0) / 60
+                "Cache skor ABSA-concat ditemukan di %s -- skip inference, langsung load.",
+                absa_cache,
             )
-        logger.info("Skor ABSA selesai dihitung untuk semua split.")
+            cache_df = pd.read_csv(absa_cache).set_index("review_id")
+            for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                for aspect in aspect_names:
+                    part_df[aspect] = part_df["review_id"].map(cache_df[aspect])
+        else:
+            for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                logger.info(
+                    "=== ABSA-concat: menghitung skor per-aspek untuk split '%s' (%d baris) ===",
+                    name, len(part_df),
+                )
+                t0 = time.time()
+                aspect_df = scorer.score_dataframe_per_aspect(part_df)
+                for aspect in aspect_names:
+                    part_df[aspect] = aspect_df[aspect].values
+                logger.info(
+                    "=== ABSA-concat: split '%s' selesai dalam %.1f menit ===",
+                    name, (time.time() - t0) / 60,
+                )
+            logger.info("Skor ABSA-concat selesai dihitung untuk semua split.")
 
-        pd.concat(
-            [
-                train_df[["review_id", "sentiment_score"]],
-                val_df[["review_id", "sentiment_score"]],
-                test_df[["review_id", "sentiment_score"]],
-            ]
-        ).to_csv(absa_scores_cache, index=False)
-        logger.info("Skor ABSA disimpan ke cache %s.", absa_scores_cache)
+            pd.concat(
+                [
+                    train_df[["review_id"] + aspect_names],
+                    val_df[["review_id"] + aspect_names],
+                    test_df[["review_id"] + aspect_names],
+                ]
+            ).to_csv(absa_cache, index=False)
+            logger.info("Skor ABSA-concat disimpan ke cache %s.", absa_cache)
+
+        # sentiment_score turunan (rata-rata kolom aspek) khusus utk CBF's
+        # sentiment_agg -- fusion (tahap 7) pakai kolom aspek mentah langsung,
+        # BUKAN kolom turunan ini.
+        for part_df in [train_df, val_df, test_df]:
+            part_df["sentiment_score"] = part_df[aspect_names].mean(axis=1)
+    else:
+        # Cache ke file BEDA NAMA dari sentiment_scores.csv milik
+        # run_baseline.py, supaya tidak bentrok/menimpa cache skor SA global.
+        absa_scores_cache = sa_checkpoint_dir / "absa_sentiment_scores.csv"
+        if absa_scores_cache.exists():
+            logger.info(
+                "Cache skor ABSA ditemukan di %s -- skip inference, langsung load.",
+                absa_scores_cache,
+            )
+            score_map = pd.read_csv(absa_scores_cache).set_index("review_id")["sentiment_score"]
+            train_df["sentiment_score"] = train_df["review_id"].map(score_map)
+            val_df["sentiment_score"] = val_df["review_id"].map(score_map)
+            test_df["sentiment_score"] = test_df["review_id"].map(score_map)
+        else:
+            # Dipisah per-split (bukan 1 log block untuk train+val+test
+            # sekaligus) supaya progress terlihat jelas -- ABSA butuh
+            # beberapa kali lebih banyak panggilan ke BERT dibanding SA
+            # global (1x per aspek yang match per baris, lihat log
+            # "ABSA: ... panggilan teks" di bawah), jadi tahap ini bisa
+            # signifikan lebih lama dari yang diperkirakan.
+            for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                logger.info(
+                    "=== ABSA: menghitung skor untuk split '%s' (%d baris) ===", name, len(part_df)
+                )
+                t0 = time.time()
+                part_df["sentiment_score"] = scorer.score_dataframe(part_df)
+                logger.info(
+                    "=== ABSA: split '%s' selesai dalam %.1f menit ===", name, (time.time() - t0) / 60
+                )
+            logger.info("Skor ABSA selesai dihitung untuk semua split.")
+
+            pd.concat(
+                [
+                    train_df[["review_id", "sentiment_score"]],
+                    val_df[["review_id", "sentiment_score"]],
+                    test_df[["review_id", "sentiment_score"]],
+                ]
+            ).to_csv(absa_scores_cache, index=False)
+            logger.info("Skor ABSA disimpan ke cache %s.", absa_scores_cache)
 
     # Diagnostik cakupan aspek -- WAJIB dilog & disimpan (bukan nice-to-have),
     # cakupan rendah = ablasi kurang bermakna (skor konvergen ke fallback lagi).
@@ -227,12 +283,19 @@ def run_pipeline(config: dict) -> None:
     logger.info("Menghitung prediksi 3 stream pada train set...")
     train_deepmf_preds = deepmf_trainer.predict(train_df, user2idx, item2idx, rating_scale)
     train_cbf_preds = cbf_predictor.predict(train_df, rating_scale)
-    train_sentiment_scores = train_df["sentiment_score"].values
 
     logger.info("Menghitung prediksi 3 stream pada test set...")
     test_deepmf_preds = deepmf_trainer.predict(test_df, user2idx, item2idx, rating_scale)
     test_cbf_preds = cbf_predictor.predict(test_df, rating_scale)
-    test_sentiment_scores = test_df["sentiment_score"].values
+
+    if absa_mode == "concat":
+        # Vektor mentah k-kolom (bukan 1 skalar) -- NMFDecisionTreeFusion
+        # sudah digeneralisasi terima input 2D (lihat fusion_nmf_dt.py).
+        train_sentiment_scores = train_df[aspect_names].values
+        test_sentiment_scores = test_df[aspect_names].values
+    else:
+        train_sentiment_scores = train_df["sentiment_score"].values
+        test_sentiment_scores = test_df["sentiment_score"].values
 
     fusion_config = FusionConfig(
         nmf_components=config["fusion_baseline"]["nmf_components"],
@@ -290,10 +353,34 @@ def run_pipeline(config: dict) -> None:
 
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_path = results_dir / f"absa_ablation_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
+    results_prefix = "absa_ablation_concat" if absa_mode == "concat" else "absa_ablation"
+    results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
+
+    model_name = (
+        "baseline_darraz_with_absa_concat_ablation"
+        if absa_mode == "concat"
+        else "baseline_darraz_with_absa_sentiment_ablation"
+    )
+    notes_concat = (
+        "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+NMF/DT "
+        "digeneralisasi terima input multi-kolom, tidak ada perubahan perilaku "
+        "lain), sentiment_score global diganti VEKTOR skor per-aspek ABSA "
+        "(TANPA agregasi/rata-rata) langsung ke fusion -- CBF tetap pakai 1 "
+        "skor turunan (rata-rata kolom aspek) untuk sentiment_agg. Ranking "
+        "metrics pakai candidate set terbatas ke item test set -- lihat "
+        "run_baseline.py."
+    )
+    notes_mean = (
+        "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+"
+        "NMF/DT, tidak diubah), sentiment_score diganti skor ABSA "
+        "keyword-based (bukan SA global) di SEMUA tempat pipeline "
+        "memakainya (termasuk sentiment_agg di CBF). Ranking metrics "
+        "pakai candidate set terbatas ke item test set -- lihat "
+        "run_baseline.py."
+    )
 
     results_summary = {
-        "model_name": "baseline_darraz_with_absa_sentiment_ablation",
+        "model_name": model_name,
         "domain": exp_cfg["domain"],
         "seed": exp_cfg["seed"],
         "n_test_samples": int(len(test_df)),
@@ -303,14 +390,7 @@ def run_pipeline(config: dict) -> None:
         "recall_at_k": {int(k): v for k, v in recall_k.items()},
         "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
         "aspect_coverage": coverage_report,
-        "notes": (
-            "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+"
-            "NMF/DT, tidak diubah), sentiment_score diganti skor ABSA "
-            "keyword-based (bukan SA global) di SEMUA tempat pipeline "
-            "memakainya (termasuk sentiment_agg di CBF). Ranking metrics "
-            "pakai candidate set terbatas ke item test set -- lihat "
-            "run_baseline.py."
-        ),
+        "notes": notes_concat if absa_mode == "concat" else notes_mean,
     }
     with open(results_path, "w") as f:
         yaml.safe_dump(results_summary, f, allow_unicode=True)

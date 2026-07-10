@@ -172,6 +172,66 @@ class KeywordAspectSentimentScorer:
             final_scores[row_idx] = float(np.mean(values))
         return final_scores
 
+    def score_dataframe_per_aspect(self, df: pd.DataFrame, text_column: str = "text_bert") -> pd.DataFrame:
+        """Skor sentimen per-aspek TANPA agregasi -- 1 kolom per aspek (nama
+        kolom = nama aspek), untuk varian ablasi "ABSA-concat": fusion
+        menerima vektor skor mentah, bukan drop-in sentiment_score tunggal
+        seperti score_dataframe(). Method INDEPENDEN dari score_dataframe()
+        (tidak berbagi kode) supaya tidak ada risiko regresi ke hasil
+        score_dataframe() yang sudah divalidasi.
+
+        Baris yang tidak menyebut aspek tertentu diisi 1 skor fallback
+        SELURUH teks review untuk aspek itu (bukan NaN) -- fallback dihitung
+        SEKALI per baris (bukan berulang per aspek yang hilang) lalu dipakai
+        ulang utk semua aspek yang hilang di baris itu, supaya jumlah
+        panggilan ke model SA tetap efisien (mirip skala dengan
+        score_dataframe(), bukan N_aspek x lipat).
+        """
+        texts = df[text_column].fillna("").tolist()
+        aspect_names = list(self.aspect_keywords.keys())
+
+        flat_texts: list[str] = []
+        flat_row_idx: list[int] = []
+        flat_aspect: list[str | None] = []  # None = skor fallback whole-review baris ini
+
+        for row_idx, text in enumerate(texts):
+            sentences = self._split_sentences(text)
+            aspect_matches = self._match_aspects(sentences)
+            for aspect, matched_sentences in aspect_matches.items():
+                flat_texts.append(" ".join(matched_sentences))
+                flat_row_idx.append(row_idx)
+                flat_aspect.append(aspect)
+            if any(aspect not in aspect_matches for aspect in aspect_names):
+                flat_texts.append(text)
+                flat_row_idx.append(row_idx)
+                flat_aspect.append(None)
+
+        avg_calls_per_row = len(flat_texts) / len(texts) if texts else 0.0
+        logger.info(
+            "ABSA-concat: %d baris -> %d panggilan teks ke model SA (rata-rata %.2fx lipat). "
+            "Umumnya lebih tinggi dari mode mean karena hampir tiap baris juga butuh 1 "
+            "skor fallback untuk aspek yang tidak disebut.",
+            len(texts),
+            len(flat_texts),
+            avg_calls_per_row,
+        )
+        flat_scores = self.sentiment_model.predict_proba(flat_texts)
+
+        row_aspect_scores: dict[int, dict[str, float]] = defaultdict(dict)
+        row_fallback: dict[int, float] = {}
+        for row_idx, aspect, score in zip(flat_row_idx, flat_aspect, flat_scores):
+            if aspect is None:
+                row_fallback[row_idx] = float(score)
+            else:
+                row_aspect_scores[row_idx][aspect] = float(score)
+
+        result_array = np.empty((len(texts), len(aspect_names)), dtype=np.float32)
+        for row_idx in range(len(texts)):
+            fallback = row_fallback.get(row_idx, 0.5)
+            for col_idx, aspect in enumerate(aspect_names):
+                result_array[row_idx, col_idx] = row_aspect_scores[row_idx].get(aspect, fallback)
+        return pd.DataFrame(result_array, columns=aspect_names)
+
     def aspect_coverage_report(self, df: pd.DataFrame, text_column: str = "text_bert") -> dict:
         """Diagnostik cakupan aspek (WAJIB dilog/disimpan tiap run nyata,
         bukan cuma nice-to-have): cakupan rendah = ablasi ABSA kurang

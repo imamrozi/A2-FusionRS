@@ -1,0 +1,76 @@
+# configs/yelp_config_absa_concat_quicktest.yaml
+# Versi smoke-test dari yelp_config_absa_concat.yaml -- subset kecil (~5.000
+# baris), untuk verifikasi cepat pipeline ABSA-concat berjalan tanpa error.
+#
+# PRASYARAT: jalankan run_baseline.py dengan yelp_config_quicktest.yaml
+# SEKALI dulu sampai tahap 4 selesai.
+
+experiment:
+  name: "yelp_absa_concat_ablation_quicktest"
+  seed: 42
+  domain: "restaurant"
+
+data:
+  raw_path: "data/raw/yelp_subset_5k.csv"
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 3
+  min_reviews_per_item: 3
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "data/splits/yelp_restaurant_quicktest"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  batch_size: 4
+  epochs: 1
+  max_grad_norm: 1.0
+
+absa:
+  mode: "concat"
+  aggregation: "mean"
+
+deepmf:
+  embedding_dim: 32
+  hidden_layers: [64, 32, 16]
+  dropout: 0.3
+  batch_size: 64
+  learning_rate: 0.001
+  negative_sampling_ratio: 0
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 20
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  nmf_components: 6
+  dt_max_depth: 5
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [3, 5]
+  n_seeds: 1
+  significance_test: "wilcoxon"
+
+logging:
+  checkpoint_dir: "checkpoints/yelp_restaurant_quicktest"
+  save_every_stage: true
