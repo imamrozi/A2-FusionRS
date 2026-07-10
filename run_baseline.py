@@ -362,7 +362,19 @@ def run_pipeline(config: dict) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Jalankan pipeline reimplementasi baseline")
     parser.add_argument("--config", type=str, default="configs/yelp_config.yaml")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override experiment.seed dari config -- utk protokol multi-seed "
+        "(n_seeds=3 + uji Wilcoxon) tanpa perlu file config terpisah per seed. "
+        "Split & checkpoint SA/sentiment_score TETAP dipakai bersama (tidak "
+        "tergantung seed ini), cuma tahap 5-8 (DeepMF/CBF/Fusion) yang "
+        "benar-benar bervariasi -- jadi run seed tambahan jauh lebih cepat.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.seed is not None:
+        cfg["experiment"]["seed"] = args.seed
     run_pipeline(cfg)

@@ -411,7 +411,17 @@ def run_pipeline(config: dict) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Jalankan varian ablasi ABSA dari pipeline baseline")
     parser.add_argument("--config", type=str, default="configs/yelp_config_absa.yaml")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override experiment.seed dari config -- utk protokol multi-seed. "
+        "Split & cache skor ABSA/SA TETAP dipakai bersama, cuma tahap 5-8 yang "
+        "bervariasi -- run seed tambahan jauh lebih cepat dari run pertama.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.seed is not None:
+        cfg["experiment"]["seed"] = args.seed
     run_pipeline(cfg)

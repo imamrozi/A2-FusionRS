@@ -168,8 +168,16 @@ if __name__ == "__main__":
         default=None,
         help="Jalankan satu algoritma saja (default: semua yang ada di config.classical_cf.algorithms)",
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override experiment.seed dari config -- utk protokol multi-seed.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    if args.seed is not None:
+        cfg["experiment"]["seed"] = args.seed
     algos = [args.algorithm] if args.algorithm else None
     run_pipeline(cfg, algorithms=algos)
