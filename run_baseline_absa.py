@@ -124,13 +124,17 @@ def run_pipeline(config: dict) -> None:
         aggregation=config.get("absa", {}).get("aggregation", "mean"),
     )
     scorer = KeywordAspectSentimentScorer(sa_model, absa_config)
-    # mode "mean" (default): skor per-aspek dirata-rata jadi 1 kolom
+    # mode "mean" (default): skor per-aspek dirata-rata POLOS jadi 1 kolom
     # sentiment_score, drop-in pengganti SA global di SEMUA tempat (broad
     # propagation, termasuk sentiment_agg CBF) -- lihat score_dataframe().
     # mode "concat": skor per-aspek TANPA agregasi, dikirim sebagai vektor
     # mentah ke Fusion (bukan 1 skalar) -- lihat score_dataframe_per_aspect()
     # & tahap 7 di bawah. CBF tetap dapat 1 skor (rata-rata kolom aspek,
     # DITURUNKAN dari hasil ini, bukan panggilan predict_proba() terpisah).
+    # mode "confidence_mean": skor per-aspek dirata-rata BERBOBOT confidence
+    # jadi 1 kolom sentiment_score -- lihat score_dataframe_confidence_weighted().
+    # Menguji apakah confidence-aware weighting memperbaiki kegagalan mode
+    # "mean" polos (RMSE jauh lebih buruk dari SA global secara empiris).
     absa_mode = config.get("absa", {}).get("mode", "mean")
     aspect_names = list(scorer.aspect_keywords.keys())
 
@@ -177,6 +181,41 @@ def run_pipeline(config: dict) -> None:
         # BUKAN kolom turunan ini.
         for part_df in [train_df, val_df, test_df]:
             part_df["sentiment_score"] = part_df[aspect_names].mean(axis=1)
+    elif absa_mode == "confidence_mean":
+        # Cache BEDA NAMA dari mode mean/concat -- ketiganya bisa hidup
+        # berdampingan tanpa saling menimpa.
+        absa_cache = sa_checkpoint_dir / "absa_confidence_mean_scores.csv"
+        if absa_cache.exists():
+            logger.info(
+                "Cache skor ABSA-confidence ditemukan di %s -- skip inference, langsung load.",
+                absa_cache,
+            )
+            score_map = pd.read_csv(absa_cache).set_index("review_id")["sentiment_score"]
+            train_df["sentiment_score"] = train_df["review_id"].map(score_map)
+            val_df["sentiment_score"] = val_df["review_id"].map(score_map)
+            test_df["sentiment_score"] = test_df["review_id"].map(score_map)
+        else:
+            for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                logger.info(
+                    "=== ABSA-confidence: menghitung skor untuk split '%s' (%d baris) ===",
+                    name, len(part_df),
+                )
+                t0 = time.time()
+                part_df["sentiment_score"] = scorer.score_dataframe_confidence_weighted(part_df)
+                logger.info(
+                    "=== ABSA-confidence: split '%s' selesai dalam %.1f menit ===",
+                    name, (time.time() - t0) / 60,
+                )
+            logger.info("Skor ABSA-confidence selesai dihitung untuk semua split.")
+
+            pd.concat(
+                [
+                    train_df[["review_id", "sentiment_score"]],
+                    val_df[["review_id", "sentiment_score"]],
+                    test_df[["review_id", "sentiment_score"]],
+                ]
+            ).to_csv(absa_cache, index=False)
+            logger.info("Skor ABSA-confidence disimpan ke cache %s.", absa_cache)
     else:
         # Cache ke file BEDA NAMA dari sentiment_scores.csv milik
         # run_baseline.py, supaya tidak bentrok/menimpa cache skor SA global.
@@ -354,31 +393,47 @@ def run_pipeline(config: dict) -> None:
 
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_prefix = "absa_ablation_concat" if absa_mode == "concat" else "absa_ablation"
-    results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
-    model_name = (
-        "baseline_darraz_with_absa_concat_ablation"
-        if absa_mode == "concat"
-        else "baseline_darraz_with_absa_sentiment_ablation"
-    )
-    notes_concat = (
-        "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+NMF/DT "
-        "digeneralisasi terima input multi-kolom, tidak ada perubahan perilaku "
-        "lain), sentiment_score global diganti VEKTOR skor per-aspek ABSA "
-        "(TANPA agregasi/rata-rata) langsung ke fusion -- CBF tetap pakai 1 "
-        "skor turunan (rata-rata kolom aspek) untuk sentiment_agg. Ranking "
-        "metrics pakai candidate set terbatas ke item test set -- lihat "
-        "run_baseline.py."
-    )
-    notes_mean = (
-        "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+"
-        "NMF/DT, tidak diubah), sentiment_score diganti skor ABSA "
-        "keyword-based (bukan SA global) di SEMUA tempat pipeline "
-        "memakainya (termasuk sentiment_agg di CBF). Ranking metrics "
-        "pakai candidate set terbatas ke item test set -- lihat "
-        "run_baseline.py."
-    )
+    # Dispatch nama file/model_name/notes per mode -- 3 mode sekarang hidup
+    # berdampingan, TIDAK saling menimpa hasil satu sama lain.
+    mode_meta = {
+        "concat": (
+            "absa_ablation_concat",
+            "baseline_darraz_with_absa_concat_ablation",
+            "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+NMF/DT "
+            "digeneralisasi terima input multi-kolom, tidak ada perubahan perilaku "
+            "lain), sentiment_score global diganti VEKTOR skor per-aspek ABSA "
+            "(TANPA agregasi/rata-rata) langsung ke fusion -- CBF tetap pakai 1 "
+            "skor turunan (rata-rata kolom aspek) untuk sentiment_agg. Ranking "
+            "metrics pakai candidate set terbatas ke item test set -- lihat "
+            "run_baseline.py.",
+        ),
+        "confidence_mean": (
+            "absa_ablation_confidence_mean",
+            "baseline_darraz_with_absa_confidence_weighted_ablation",
+            "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+NMF/DT, "
+            "tidak diubah), sentiment_score diganti RATA-RATA BERBOBOT CONFIDENCE "
+            "antar skor ABSA per-aspek (bukan rata-rata polos) -- menguji apakah "
+            "confidence-aware weighting (pendekatan dari paper IEEE penulis "
+            "sebelumnya) memperbaiki kegagalan mode 'mean' polos. Confidence dari "
+            "margin skor + jumlah kalimat bukti per aspek, lihat "
+            "score_dataframe_confidence_weighted() di absa_bert.py. Ranking "
+            "metrics pakai candidate set terbatas ke item test set -- lihat "
+            "run_baseline.py.",
+        ),
+        "mean": (
+            "absa_ablation",
+            "baseline_darraz_with_absa_sentiment_ablation",
+            "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+"
+            "NMF/DT, tidak diubah), sentiment_score diganti skor ABSA "
+            "keyword-based (bukan SA global) di SEMUA tempat pipeline "
+            "memakainya (termasuk sentiment_agg di CBF). Ranking metrics "
+            "pakai candidate set terbatas ke item test set -- lihat "
+            "run_baseline.py.",
+        ),
+    }
+    results_prefix, model_name, notes = mode_meta.get(absa_mode, mode_meta["mean"])
+    results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
         "model_name": model_name,
@@ -391,7 +446,7 @@ def run_pipeline(config: dict) -> None:
         "recall_at_k": {int(k): v for k, v in recall_k.items()},
         "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
         "aspect_coverage": coverage_report,
-        "notes": notes_concat if absa_mode == "concat" else notes_mean,
+        "notes": notes,
     }
     save_results_yaml(results_path, results_summary, config=config)
 

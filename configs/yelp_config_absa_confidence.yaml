@@ -1,0 +1,79 @@
+# configs/yelp_config_absa_confidence.yaml
+# Varian "ABSA-confidence": skor per-aspek diagregasi jadi 1 skalar seperti
+# yelp_config_absa.yaml ("ABSA-mean"), TAPI rata-ratanya BERBOBOT confidence
+# (bukan rata-rata polos) -- menguji apakah confidence-aware weighting bisa
+# memperbaiki kegagalan mode mean polos. Lihat
+# score_dataframe_confidence_weighted() di absa_bert.py.
+#
+# PRASYARAT: jalankan run_baseline.py dengan yelp_config.yaml SEKALI dulu
+# sampai tahap 4 selesai (checkpoint_dir HARUS SAMA dengan yelp_config.yaml).
+
+experiment:
+  name: "yelp_absa_confidence_ablation"
+  seed: 42
+  domain: "restaurant"
+
+data:
+  raw_path: "data/raw/yelp_training_set_review.csv"
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 5
+  min_reviews_per_item: 5
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "data/splits/yelp_restaurant"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"          # nama section historis -- di ablasi ini nilainya DIGANTI oleh ABSA
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  batch_size: 16
+  epochs: 3
+  max_grad_norm: 1.0
+
+absa:
+  mode: "confidence_mean"   # <- BEDA dari yelp_config_absa.yaml (yang default "mean")
+  aggregation: "mean"
+
+deepmf:
+  embedding_dim: 128
+  hidden_layers: [256, 128, 64, 32]
+  dropout: 0.3
+  batch_size: 512
+  learning_rate: 0.001
+  negative_sampling_ratio: 0
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 50
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  nmf_components: 3
+  dt_max_depth: 10
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [5, 10, 20]
+  n_seeds: 3
+  significance_test: "wilcoxon"
+
+logging:
+  checkpoint_dir: "checkpoints/yelp_restaurant"
+  save_every_stage: true

@@ -1,0 +1,91 @@
+# configs/yelp_config_absa_confidence_colab.yaml
+#
+# Varian "ABSA-confidence": skor per-aspek diagregasi jadi 1 skalar seperti
+# yelp_config_absa_colab.yaml ("ABSA-mean"), TAPI rata-ratanya BERBOBOT
+# confidence (bukan rata-rata polos) -- menguji apakah confidence-aware
+# weighting (pendekatan dari paper IEEE penulis sebelumnya) bisa memperbaiki
+# kegagalan mode mean polos (RMSE jauh lebih buruk dari SA global secara
+# empiris). Lihat score_dataframe_confidence_weighted() di absa_bert.py.
+#
+# PRASYARAT: jalankan run_baseline.py --config configs/yelp_config_colab.yaml
+# SEKALI dulu sampai tahap 4 selesai (checkpoint SA dipakai ulang).
+#
+# Mount Drive dulu di notebook sebelum menjalankan:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+experiment:
+  name: "yelp_absa_confidence_ablation_colab"
+  seed: 42
+  domain: "restaurant"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/yelp_training_set_review.csv"
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 5
+  min_reviews_per_item: 5
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/yelp_restaurant"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"          # nama section historis -- di ablasi ini nilainya DIGANTI oleh ABSA
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  batch_size: 32
+  epochs: 3
+  max_grad_norm: 1.0
+
+absa:
+  mode: "confidence_mean"   # <- BEDA dari yelp_config_absa_colab.yaml (yang default "mean")
+  aggregation: "mean"       # tidak dipakai di mode ini (cuma relevan utk mode "mean" polos)
+
+deepmf:
+  embedding_dim: 128
+  hidden_layers: [256, 128, 64, 32]
+  dropout: 0.3
+  batch_size: 512
+  learning_rate: 0.001
+  negative_sampling_ratio: 0
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 50
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  # 3 (sama seperti mode mean) -- output confidence_mean tetap 1 skalar,
+  # bukan vektor multi-kolom seperti mode concat.
+  nmf_components: 3
+  dt_max_depth: 10
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [5, 10, 20]
+  n_seeds: 3
+  significance_test: "wilcoxon"
+
+logging:
+  # SAMA PERSIS dengan yelp_config_colab.yaml -- supaya checkpoint model SA
+  # yang sudah ada otomatis ditemukan. Hasil tersimpan ke file berbeda
+  # (absa_ablation_confidence_mean_*.yaml) -- tidak menimpa hasil mode
+  # mean/concat yang sudah ada.
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/yelp_restaurant"
+  save_every_stage: true

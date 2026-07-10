@@ -12,16 +12,22 @@ seluruh teks review.
 DESAIN YANG DISENGAJA (konsisten dengan pendekatan di paper IEEE penulis
 sebelumnya, "...Empirical Study on ABSA Quality Impact"): deteksi aspek
 berbasis KEYWORD MATCHING sederhana, bukan model ABSA terlatih (tidak ada
-dataset aspek berlabel untuk Yelp) dan TANPA confidence-weighting (skor
-sentimen per aspek saja). Kontribusi novel proyek ini ada di mekanisme
-Attention-Gated Fusion (Fase 2), bukan di teknik ekstraksi aspek ini.
+dataset aspek berlabel untuk Yelp). Kontribusi novel proyek ini ada di
+mekanisme Attention-Gated Fusion (Fase 2), bukan di teknik ekstraksi aspek
+ini.
 
-PENTING: skor per aspek di sini di-AGREGASI jadi SATU skalar per baris
-(rata-rata antar aspek yang match) sebelum dipakai run_baseline_absa.py --
-supaya jadi drop-in replacement persis untuk kolom `sentiment_score` yang
-sudah ada, TANPA perlu mengubah cbf_clustering.py/fusion_nmf_dt.py sama
-sekali. Mengekspos vektor skor per-aspek penuh ke fusion (bukan cuma rata-
-rata) adalah pekerjaan Fase 2 (Attention-Gated Fusion yang sesungguhnya).
+TIGA cara mengonsumsi skor per-aspek, masing-masing method independen
+(tidak berbagi kode -- zero risiko regresi antar varian):
+1. `score_dataframe()`: rata-rata polos antar aspek yang match -> 1 skalar
+   (mode "mean" di run_baseline_absa.py). RMSE empiris jauh lebih buruk
+   dari SA global -- rata-rata polos membuang banyak informasi.
+2. `score_dataframe_per_aspect()`: TANPA agregasi -- vektor mentah per
+   aspek dikirim langsung ke fusion (mode "concat"). RMSE empiris setara
+   SA global (tidak signifikan berbeda, lihat run_significance_test.py).
+3. `score_dataframe_confidence_weighted()`: rata-rata BERBOBOT confidence
+   antar aspek yang match -> 1 skalar (mode "confidence_mean"). Menguji
+   hipotesis dari paper IEEE penulis sebelumnya: apakah confidence-aware
+   weighting bisa memperbaiki kegagalan rata-rata polos di (1).
 """
 
 from __future__ import annotations
@@ -231,6 +237,88 @@ class KeywordAspectSentimentScorer:
             for col_idx, aspect in enumerate(aspect_names):
                 result_array[row_idx, col_idx] = row_aspect_scores[row_idx].get(aspect, fallback)
         return pd.DataFrame(result_array, columns=aspect_names)
+
+    @staticmethod
+    def _sentiment_confidence(score: float) -> float:
+        """Margin skor dari 0,5 sbg proxy confidence prediksi sentimen --
+        skor dekat 0,5 (ambigu) = confidence rendah, skor dekat 0/1 (jelas
+        positif/negatif) = confidence tinggi. TIDAK butuh panggilan model
+        tambahan -- turunan murni dari skor predict_proba() yang sudah ada.
+        """
+        return abs(score - 0.5) * 2.0
+
+    @staticmethod
+    def _evidence_confidence(n_sentences: int, cap: int = 3) -> float:
+        """Proxy confidence dari jumlah kalimat yang match utk aspek ini --
+        lebih banyak bukti tekstual = lebih yakin. Cap di `cap` kalimat (di
+        atas itu dianggap sudah cukup bukti, tidak naik linear tanpa batas).
+        """
+        return min(n_sentences / cap, 1.0)
+
+    def score_dataframe_confidence_weighted(
+        self, df: pd.DataFrame, text_column: str = "text_bert", min_confidence: float = 0.05
+    ) -> np.ndarray:
+        """Drop-in pengganti GlobalSentimentBERT.predict_proba() SEPERTI
+        score_dataframe(), TAPI agregasi antar-aspek pakai RATA-RATA
+        BERBOBOT confidence (bukan rata-rata polos) -- method INDEPENDEN
+        (tidak berbagi kode dengan score_dataframe(), zero risiko regresi
+        ke hasil ABSA-mean yang sudah divalidasi).
+
+        Confidence per (baris, aspek) = rata-rata dari:
+        1. sentiment_confidence: margin skor dari 0,5 (skor yang SUDAH
+           dihitung -- TIDAK ada panggilan BERT tambahan sama sekali
+           dibanding score_dataframe(), cuma bookkeeping ekstra).
+        2. evidence_confidence: seberapa banyak kalimat yang match untuk
+           aspek itu (lebih banyak bukti tekstual = lebih yakin).
+        Baris fallback (whole-review, 0 aspek match) otomatis dapat
+        evidence_confidence=0 -- konsisten dengan intuisi bahwa estimasi
+        fallback kurang spesifik/kurang bisa diandalkan.
+
+        `min_confidence`: batas bawah supaya tidak ada pembagian dengan
+        total bobot nol -- skor tetap ikut kontribusi minimal, bukan
+        diabaikan total.
+        """
+        texts = df[text_column].fillna("").tolist()
+
+        flat_texts: list[str] = []
+        flat_row_idx: list[int] = []
+        flat_n_sentences: list[int] = []
+
+        for row_idx, text in enumerate(texts):
+            sentences = self._split_sentences(text)
+            aspect_matches = self._match_aspects(sentences)
+            if not aspect_matches:
+                flat_texts.append(text)
+                flat_row_idx.append(row_idx)
+                flat_n_sentences.append(0)  # fallback -- tidak ada bukti aspek spesifik
+            else:
+                for _aspect, matched_sentences in aspect_matches.items():
+                    flat_texts.append(" ".join(matched_sentences))
+                    flat_row_idx.append(row_idx)
+                    flat_n_sentences.append(len(matched_sentences))
+
+        logger.info(
+            "ABSA-confidence: %d baris -> %d panggilan teks ke model SA (sama seperti mode "
+            "mean -- confidence dihitung dari skor & jumlah kalimat yang SUDAH ada, tanpa "
+            "panggilan tambahan).",
+            len(texts), len(flat_texts),
+        )
+        flat_scores = self.sentiment_model.predict_proba(flat_texts)
+
+        per_row_weighted: dict[int, list[tuple[float, float]]] = defaultdict(list)
+        for row_idx, score, n_sentences in zip(flat_row_idx, flat_scores, flat_n_sentences):
+            sentiment_conf = self._sentiment_confidence(float(score))
+            evidence_conf = self._evidence_confidence(n_sentences)
+            confidence = max((sentiment_conf + evidence_conf) / 2.0, min_confidence)
+            per_row_weighted[row_idx].append((float(score), confidence))
+
+        final_scores = np.empty(len(texts), dtype=np.float32)
+        for row_idx in range(len(texts)):
+            pairs = per_row_weighted.get(row_idx, [(0.5, min_confidence)])
+            scores_arr = np.array([p[0] for p in pairs])
+            weights_arr = np.array([p[1] for p in pairs])
+            final_scores[row_idx] = float(np.sum(scores_arr * weights_arr) / np.sum(weights_arr))
+        return final_scores
 
     def aspect_coverage_report(self, df: pd.DataFrame, text_column: str = "text_bert") -> dict:
         """Diagnostik cakupan aspek (WAJIB dilog/disimpan tiap run nyata,
