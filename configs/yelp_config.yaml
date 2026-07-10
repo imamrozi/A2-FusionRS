@@ -61,7 +61,15 @@ deepmf:
   dropout: 0.3
   batch_size: 512
   learning_rate: 0.001
-  negative_sampling_ratio: 4
+  # 0 (bukan 4) -- Table 10 paper (hyperparameter DeepMF) TIDAK menyebut
+  # negative sampling sama sekali. Diverifikasi empiris juga: negative
+  # sampling ratio 1:4 menyebabkan val RMSE overfit sejak epoch 1->2 dan
+  # terus memburuk sampai epoch 20 (0.363 -> 0.590), sedangkan tanpa negative
+  # sampling val RMSE membaik monoton sepanjang training (0.326 -> 0.291).
+  # Nilai 4 sebelumnya berasal dari proposal A2-FusionRS bagian E, bukan
+  # dari baseline paper -- dipakai NANTI untuk DeepMF stream A2-FusionRS
+  # sendiri (Fase 2) kalau memang diperlukan, bukan untuk baseline ini.
+  negative_sampling_ratio: 0
   loss: "mse"
   optimizer: "sgd"
 

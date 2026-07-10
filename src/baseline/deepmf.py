@@ -7,8 +7,16 @@ mengikuti spesifikasi arsitektur pada proposal (Embedding 128, Deep layers
 sebagai salah satu stream A2-FusionRS -- perbedaan utama ada di fusion
 layer, bukan di modul DeepMF ini sendiri.
 
-Catatan: hyperparameter batch_size=512, lr=0.001, negative_sampling 1:4
-sesuai proposal bagian E (Metode).
+Catatan: hyperparameter batch_size=512, lr=0.001 sesuai proposal bagian E
+(Metode). negative_sampling_ratio DEFAULT DI CONFIG BASELINE = 0 (bukan 1:4
+seperti draf awal proposal) -- Table 10 baseline paper (Darraz et al.) tidak
+menyebut negative sampling sama sekali untuk DeepMF, dan secara empiris
+(run penuh domain restoran) ratio 1:4 terbukti menyebabkan overfit parah:
+val RMSE memburuk monoton sejak epoch 1 (0.363 -> 0.590 di epoch 20),
+sedangkan tanpa negative sampling val RMSE membaik monoton (0.326 -> 0.291)
+dan RMSE fusion akhir juga lebih baik (0.7044 -> 0.6906). Parameter
+`negative_sampling_ratio` tetap didukung (bukan dihapus) untuk kebutuhan
+stream DeepMF A2-FusionRS sendiri di Fase 2 kalau memang diperlukan di sana.
 """
 
 from __future__ import annotations

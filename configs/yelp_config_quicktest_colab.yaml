@@ -61,7 +61,9 @@ deepmf:
   dropout: 0.3
   batch_size: 64
   learning_rate: 0.001
-  negative_sampling_ratio: 4
+  # 0 -- Table 10 paper tidak menyebut negative sampling; diverifikasi
+  # empiris di run penuh juga menyebabkan overfit (lihat yelp_config.yaml).
+  negative_sampling_ratio: 0
   loss: "mse"
   optimizer: "sgd"
 

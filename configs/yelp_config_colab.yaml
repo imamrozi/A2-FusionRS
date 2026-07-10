@@ -65,7 +65,12 @@ deepmf:
   dropout: 0.3
   batch_size: 512
   learning_rate: 0.001
-  #negative_sampling_ratio: 4
+  # 0 (bukan 4) -- Table 10 paper TIDAK menyebut negative sampling sama
+  # sekali. Diverifikasi empiris (run penuh domain restoran): ratio 1:4
+  # membuat val RMSE overfit sejak epoch 1->2 dan terus memburuk sampai
+  # epoch 20 (0.363 -> 0.590), tanpa negative sampling val RMSE membaik
+  # monoton sepanjang training (0.326 -> 0.291), RMSE final fusion juga
+  # lebih baik (0.7044 -> 0.6906).
   negative_sampling_ratio: 0
   loss: "mse"
   optimizer: "sgd"
