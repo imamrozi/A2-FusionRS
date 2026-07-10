@@ -320,6 +320,26 @@ class KeywordAspectSentimentScorer:
             final_scores[row_idx] = float(np.sum(scores_arr * weights_arr) / np.sum(weights_arr))
         return final_scores
 
+    def compute_aspect_evidence_counts(self, df: pd.DataFrame, text_column: str = "text_bert") -> pd.DataFrame:
+        """Hitung jumlah kalimat yang match per aspek, TANPA panggilan
+        predict_proba() sama sekali (CPU-only, murah -- cuma sentence-split
+        + keyword matching). Dipakai bareng skor aspek yang SUDAH ada (dari
+        score_dataframe_per_aspect() atau cache absa_aspect_scores.csv) utk
+        menghitung confidence tanpa perlu inference BERT ulang -- lihat
+        mode "concat_confidence" di run_baseline_absa.py.
+        """
+        texts = df[text_column].fillna("").tolist()
+        aspect_names = list(self.aspect_keywords.keys())
+        counts = np.zeros((len(texts), len(aspect_names)), dtype=np.int32)
+
+        for row_idx, text in enumerate(texts):
+            sentences = self._split_sentences(text)
+            aspect_matches = self._match_aspects(sentences)
+            for col_idx, aspect in enumerate(aspect_names):
+                if aspect in aspect_matches:
+                    counts[row_idx, col_idx] = len(aspect_matches[aspect])
+        return pd.DataFrame(counts, columns=aspect_names)
+
     def aspect_coverage_report(self, df: pd.DataFrame, text_column: str = "text_bert") -> dict:
         """Diagnostik cakupan aspek (WAJIB dilog/disimpan tiap run nyata,
         bukan cuma nice-to-have): cakupan rendah = ablasi ABSA kurang

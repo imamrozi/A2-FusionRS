@@ -1,0 +1,93 @@
+# configs/yelp_config_absa_concat_confidence_colab.yaml
+#
+# Varian "ABSA-concat-confidence": vektor mentah SEPERTI
+# yelp_config_absa_concat_colab.yaml (skor per-aspek TANPA agregasi), TAPI
+# ditambah kolom confidence per aspek sbg fitur EKSTRA (8 kolom: 4 skor + 4
+# confidence) -- menguji apakah confidence sbg sinyal eksplisit per-baris
+# membantu DecisionTree di atas mode "concat" polos.
+#
+# EFISIENSI: kalau cache mode "concat" (dari yelp_config_absa_concat_colab.yaml)
+# SUDAH ADA, skor aspek DI-REUSE TANPA panggilan BERT baru sama sekali --
+# cuma evidence count (CPU-only, murah) yang dihitung ulang. Jalankan
+# yelp_config_absa_concat_colab.yaml DULU kalau ingin manfaatkan ini.
+#
+# PRASYARAT: jalankan run_baseline.py --config configs/yelp_config_colab.yaml
+# SEKALI dulu sampai tahap 4 selesai.
+#
+# Mount Drive dulu di notebook sebelum menjalankan:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+experiment:
+  name: "yelp_absa_concat_confidence_ablation_colab"
+  seed: 42
+  domain: "restaurant"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/yelp_training_set_review.csv"
+  business_attributes_required: ["business_categories", "business_stars", "business_city"]
+  min_reviews_per_user: 5
+  min_reviews_per_item: 5
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/yelp_restaurant"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"          # nama section historis -- di ablasi ini nilainya DIGANTI oleh ABSA
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  batch_size: 32
+  epochs: 3
+  max_grad_norm: 1.0
+
+absa:
+  mode: "concat_confidence"
+  aggregation: "mean"   # tidak dipakai di mode ini
+
+deepmf:
+  embedding_dim: 128
+  hidden_layers: [256, 128, 64, 32]
+  dropout: 0.3
+  batch_size: 512
+  learning_rate: 0.001
+  negative_sampling_ratio: 0
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "kmeans"
+  k_selection: "elbow"
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 50
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  # 10 (bukan 3/6) -- fitur mentah sekarang 4 aspek + 4 confidence + deepmf
+  # + cbf = 10 kolom. Mengikuti logika paper Algorithm 1 (n_components =
+  # n_fitur_mentah) -- di-cap otomatis oleh fusion_nmf_dt.py kalau melebihi
+  # batas aman.
+  nmf_components: 10
+  dt_max_depth: 10
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [5, 10, 20]
+  n_seeds: 3
+  significance_test: "wilcoxon"
+
+logging:
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/yelp_restaurant"
+  save_every_stage: true

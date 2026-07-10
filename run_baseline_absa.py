@@ -135,8 +135,16 @@ def run_pipeline(config: dict) -> None:
     # jadi 1 kolom sentiment_score -- lihat score_dataframe_confidence_weighted().
     # Menguji apakah confidence-aware weighting memperbaiki kegagalan mode
     # "mean" polos (RMSE jauh lebih buruk dari SA global secara empiris).
+    # mode "concat_confidence": vektor mentah SEPERTI mode "concat" (skor
+    # per-aspek TANPA agregasi), TAPI ditambah kolom confidence per aspek
+    # sebagai fitur EKSTRA (bukan utk agregasi) -- 8 kolom (4 skor + 4
+    # confidence) dikirim ke fusion, memberi DecisionTree sinyal eksplisit
+    # "seberapa yakin skor aspek ini" per baris. Kalau cache mode "concat"
+    # sudah ada, skor aspek DI-REUSE (TIDAK ada panggilan BERT baru sama
+    # sekali) -- cuma evidence count (CPU-only) yang dihitung ulang.
     absa_mode = config.get("absa", {}).get("mode", "mean")
     aspect_names = list(scorer.aspect_keywords.keys())
+    confidence_names = [f"{a}_confidence" for a in aspect_names]
 
     if absa_mode == "concat":
         # Cache BEDA NAMA dari mode mean, supaya keduanya bisa hidup
@@ -179,6 +187,76 @@ def run_pipeline(config: dict) -> None:
         # sentiment_score turunan (rata-rata kolom aspek) khusus utk CBF's
         # sentiment_agg -- fusion (tahap 7) pakai kolom aspek mentah langsung,
         # BUKAN kolom turunan ini.
+        for part_df in [train_df, val_df, test_df]:
+            part_df["sentiment_score"] = part_df[aspect_names].mean(axis=1)
+    elif absa_mode == "concat_confidence":
+        # Cache LENGKAP (skor + confidence) BEDA NAMA dari mode lain.
+        absa_cache = sa_checkpoint_dir / "absa_concat_confidence_scores.csv"
+        # Cache mode "concat" (kalau ada) -- di-REUSE utk skor aspek TANPA
+        # panggilan BERT baru sama sekali, cuma evidence count yang dihitung
+        # ulang (CPU-only, murah).
+        concat_cache = sa_checkpoint_dir / "absa_aspect_scores.csv"
+
+        if absa_cache.exists():
+            logger.info(
+                "Cache skor ABSA-concat-confidence ditemukan di %s -- skip inference, langsung load.",
+                absa_cache,
+            )
+            cache_df = pd.read_csv(absa_cache).set_index("review_id")
+            for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                for col in aspect_names + confidence_names:
+                    part_df[col] = part_df["review_id"].map(cache_df[col])
+        else:
+            if concat_cache.exists():
+                logger.info(
+                    "Cache mode 'concat' ditemukan di %s -- reuse skor aspek TANPA panggilan "
+                    "BERT baru, cuma hitung evidence count (CPU-only, murah).",
+                    concat_cache,
+                )
+                score_cache_df = pd.read_csv(concat_cache).set_index("review_id")
+                for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                    for aspect in aspect_names:
+                        part_df[aspect] = part_df["review_id"].map(score_cache_df[aspect])
+            else:
+                for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                    logger.info(
+                        "=== ABSA-concat-confidence: menghitung skor per-aspek untuk split "
+                        "'%s' (%d baris) ===", name, len(part_df),
+                    )
+                    t0 = time.time()
+                    aspect_df = scorer.score_dataframe_per_aspect(part_df)
+                    for aspect in aspect_names:
+                        part_df[aspect] = aspect_df[aspect].values
+                    logger.info(
+                        "=== ABSA-concat-confidence: split '%s' selesai dalam %.1f menit ===",
+                        name, (time.time() - t0) / 60,
+                    )
+
+            # Evidence count (CPU-only, TIDAK ada panggilan BERT) -- dipakai
+            # bareng skor aspek (baik hasil reuse cache maupun baru dihitung)
+            # utk menurunkan confidence per aspek, formula SAMA PERSIS dengan
+            # score_dataframe_confidence_weighted() (reuse static method,
+            # bukan reimplementasi terpisah -- cegah divergensi formula).
+            for name, part_df in [("train", train_df), ("val", val_df), ("test", test_df)]:
+                evidence_df = scorer.compute_aspect_evidence_counts(part_df)
+                for aspect, conf_col in zip(aspect_names, confidence_names):
+                    sentiment_conf = part_df[aspect].apply(scorer._sentiment_confidence)
+                    evidence_conf = evidence_df[aspect].apply(scorer._evidence_confidence)
+                    part_df[conf_col] = ((sentiment_conf + evidence_conf) / 2.0).values
+
+            logger.info("Skor & confidence ABSA-concat-confidence selesai dihitung untuk semua split.")
+
+            pd.concat(
+                [
+                    train_df[["review_id"] + aspect_names + confidence_names],
+                    val_df[["review_id"] + aspect_names + confidence_names],
+                    test_df[["review_id"] + aspect_names + confidence_names],
+                ]
+            ).to_csv(absa_cache, index=False)
+            logger.info("Skor ABSA-concat-confidence disimpan ke cache %s.", absa_cache)
+
+        # sentiment_score turunan (rata-rata kolom SKOR aspek saja, BUKAN
+        # confidence) khusus utk CBF -- sama semangat dengan mode "concat".
         for part_df in [train_df, val_df, test_df]:
             part_df["sentiment_score"] = part_df[aspect_names].mean(axis=1)
     elif absa_mode == "confidence_mean":
@@ -333,6 +411,12 @@ def run_pipeline(config: dict) -> None:
         # sudah digeneralisasi terima input 2D (lihat fusion_nmf_dt.py).
         train_sentiment_scores = train_df[aspect_names].values
         test_sentiment_scores = test_df[aspect_names].values
+    elif absa_mode == "concat_confidence":
+        # 8 kolom (4 skor + 4 confidence) -- confidence sbg fitur EKSTRA,
+        # bukan utk agregasi.
+        feature_cols = aspect_names + confidence_names
+        train_sentiment_scores = train_df[feature_cols].values
+        test_sentiment_scores = test_df[feature_cols].values
     else:
         train_sentiment_scores = train_df["sentiment_score"].values
         test_sentiment_scores = test_df["sentiment_score"].values
@@ -420,6 +504,19 @@ def run_pipeline(config: dict) -> None:
             "score_dataframe_confidence_weighted() di absa_bert.py. Ranking "
             "metrics pakai candidate set terbatas ke item test set -- lihat "
             "run_baseline.py.",
+        ),
+        "concat_confidence": (
+            "absa_ablation_concat_confidence",
+            "baseline_darraz_with_absa_concat_confidence_ablation",
+            "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+NMF/DT "
+            "digeneralisasi terima input multi-kolom), sentiment_score global "
+            "diganti VEKTOR 8 kolom (4 skor ABSA per-aspek + 4 confidence per "
+            "aspek sbg fitur EKSTRA, bukan utk agregasi) langsung ke fusion -- "
+            "menguji apakah confidence sbg sinyal eksplisit per-baris membantu "
+            "DecisionTree di atas mode 'concat' polos. CBF tetap pakai 1 skor "
+            "turunan (rata-rata kolom SKOR aspek saja) utk sentiment_agg. "
+            "Ranking metrics pakai candidate set terbatas ke item test set -- "
+            "lihat run_baseline.py.",
         ),
         "mean": (
             "absa_ablation",
