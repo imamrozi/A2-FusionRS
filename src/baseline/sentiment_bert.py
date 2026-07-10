@@ -214,40 +214,63 @@ class GlobalSentimentBERT:
                 logger.info("Epoch %d - val accuracy: %.4f", epoch + 1, val_acc)
 
     @torch.no_grad()
-    def predict_proba(self, texts: list[str]) -> np.ndarray:
+    def predict_proba(self, texts: list[str], chunk_size: int = 10000) -> np.ndarray:
         """Return probabilitas kelas positif -- dipakai sebagai skor sentimen
         global yang masuk ke fusion layer (bukan hanya label biner).
 
-        Progress bar (tqdm) SENGAJA ditambahkan di sini -- tanpa ini, panggilan
-        dengan banyak teks (ratusan ribu, mis. dari absa_bert.py yang
-        memanggil predict_proba() dengan beberapa kali lipat teks per baris
-        dataset karena skor per-aspek) bisa terlihat seperti hang selama
-        puluhan menit tanpa output apa pun. Pernah terjadi: proses disconnect
-        sendiri di Colab (diduga idle-timeout krn tidak ada output baru),
-        BUKAN karena user menekan Ctrl+C.
+        DIPROSES PER-CHUNK (`chunk_size` teks per potongan), BUKAN tokenisasi
+        SEMUA teks input sekaligus di awal. Alasan: `ReviewSentimentDataset`
+        men-tokenisasi seluruh list teks dalam satu panggilan tokenizer() saat
+        __init__ -- untuk input besar (ratusan ribu teks, mis. dari
+        absa_bert.py yang bisa >2x lipat jumlah baris dataset karena skor
+        per-aspek) ini menciptakan lonjakan RAM besar tepat sebelum forward
+        pass pertama. Pernah menyebabkan proses mati mendadak di Colab (RAM
+        habis, BUKAN karena user interupsi) persis di titik itu. Memproses
+        per-chunk membatasi puncak RAM sekaligus membuat log/progress lebih
+        sering muncul (bukan satu blok tokenisasi raksasa yang senyap dulu).
         """
         self.model.eval()
-        dataset = ReviewSentimentDataset(
-            texts, [0] * len(texts), self.tokenizer, self.config.max_length
-        )
-        loader = DataLoader(
-            dataset,
-            batch_size=self.config.batch_size,
-            shuffle=False,
-            num_workers=self.config.num_workers,
-            pin_memory=self.config.pin_memory,
-        )
+        n = len(texts)
+        n_chunks = max(1, (n + chunk_size - 1) // chunk_size)
+        all_probs = []
 
-        probs = []
-        progress_bar = tqdm(loader, desc=f"Inference ({len(texts)} teks)", unit="batch")
-        for batch in progress_bar:
-            input_ids = batch["input_ids"].to(self.config.device, non_blocking=True)
-            attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=True)
-            with torch.autocast(device_type="cuda", enabled=self.config.use_amp):
-                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-            batch_probs = torch.softmax(outputs.logits.float(), dim=-1)[:, 1]
-            probs.append(batch_probs.cpu().numpy())
-        return np.concatenate(probs)
+        for chunk_idx in range(n_chunks):
+            start = chunk_idx * chunk_size
+            end = min(start + chunk_size, n)
+            chunk_texts = texts[start:end]
+
+            if n_chunks > 1:
+                logger.info(
+                    "Inference chunk %d/%d (%d teks, baris %d-%d dari %d)...",
+                    chunk_idx + 1, n_chunks, len(chunk_texts), start, end - 1, n,
+                )
+
+            dataset = ReviewSentimentDataset(
+                chunk_texts, [0] * len(chunk_texts), self.tokenizer, self.config.max_length
+            )
+            loader = DataLoader(
+                dataset,
+                batch_size=self.config.batch_size,
+                shuffle=False,
+                num_workers=self.config.num_workers,
+                pin_memory=self.config.pin_memory,
+            )
+
+            chunk_probs = []
+            desc = f"Inference chunk {chunk_idx + 1}/{n_chunks}" if n_chunks > 1 else f"Inference ({n} teks)"
+            progress_bar = tqdm(loader, desc=desc, unit="batch")
+            for batch in progress_bar:
+                input_ids = batch["input_ids"].to(self.config.device, non_blocking=True)
+                attention_mask = batch["attention_mask"].to(self.config.device, non_blocking=True)
+                with torch.autocast(device_type="cuda", enabled=self.config.use_amp):
+                    outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                batch_probs = torch.softmax(outputs.logits.float(), dim=-1)[:, 1]
+                chunk_probs.append(batch_probs.cpu().numpy())
+
+            all_probs.append(np.concatenate(chunk_probs))
+            del dataset, loader, chunk_probs  # lepaskan tensor tokenisasi chunk ini sebelum lanjut
+
+        return np.concatenate(all_probs)
 
     @torch.no_grad()
     def evaluate(self, df: pd.DataFrame) -> float:
