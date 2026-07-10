@@ -144,9 +144,42 @@ def run_pipeline(config: dict) -> None:
 
     # Skor sentimen (probabilitas) untuk SEMUA baris (train/val/test),
     # dipakai sebagai fitur numerik ke fusion layer -- bukan label biner.
-    train_df["sentiment_score"] = sa_model.predict_proba(train_df["text_bert"].tolist())
-    val_df["sentiment_score"] = sa_model.predict_proba(val_df["text_bert"].tolist())
-    test_df["sentiment_score"] = sa_model.predict_proba(test_df["text_bert"].tolist())
+    # Di-cache ke file di sebelah checkpoint model SA -- inference forward-only
+    # ini tetap makan ~15-20 menit untuk ratusan ribu baris meski model SA-nya
+    # sendiri sudah di-skip training via checkpoint, jadi tanpa cache ini,
+    # setiap eksperimen ulang di tahap 5+ (mis. tuning DeepMF/CBF/fusion)
+    # SELALU menunggu ~20 menit lagi tanpa perlu. Hapus sa_checkpoint_dir
+    # untuk invalidate keduanya (model + cache skor) sekaligus.
+    sentiment_scores_cache = sa_checkpoint_dir / "sentiment_scores.csv"
+    if sentiment_scores_cache.exists():
+        logger.info(
+            "Cache sentiment_score ditemukan di %s -- skip inference, langsung load.",
+            sentiment_scores_cache,
+        )
+        score_map = pd.read_csv(sentiment_scores_cache).set_index("review_id")["sentiment_score"]
+        train_df["sentiment_score"] = train_df["review_id"].map(score_map)
+        val_df["sentiment_score"] = val_df["review_id"].map(score_map)
+        test_df["sentiment_score"] = test_df["review_id"].map(score_map)
+    else:
+        logger.info(
+            "Menghitung sentiment_score (inference) untuk %d baris train + %d val + %d test...",
+            len(train_df),
+            len(val_df),
+            len(test_df),
+        )
+        train_df["sentiment_score"] = sa_model.predict_proba(train_df["text_bert"].tolist())
+        val_df["sentiment_score"] = sa_model.predict_proba(val_df["text_bert"].tolist())
+        test_df["sentiment_score"] = sa_model.predict_proba(test_df["text_bert"].tolist())
+        logger.info("sentiment_score selesai dihitung untuk semua split.")
+
+        pd.concat(
+            [
+                train_df[["review_id", "sentiment_score"]],
+                val_df[["review_id", "sentiment_score"]],
+                test_df[["review_id", "sentiment_score"]],
+            ]
+        ).to_csv(sentiment_scores_cache, index=False)
+        logger.info("sentiment_score disimpan ke cache %s.", sentiment_scores_cache)
 
     # ---------- 5. DeepMF ----------
     logger.info("=== Tahap 5: Training DeepMF ===")

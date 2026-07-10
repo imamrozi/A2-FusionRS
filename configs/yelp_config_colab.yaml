@@ -65,7 +65,8 @@ deepmf:
   dropout: 0.3
   batch_size: 512
   learning_rate: 0.001
-  negative_sampling_ratio: 4
+  #negative_sampling_ratio: 4
+  negative_sampling_ratio: 0
   loss: "mse"
   optimizer: "sgd"
 
