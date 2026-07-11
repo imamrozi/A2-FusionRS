@@ -70,6 +70,16 @@ def precision_recall_ndcg_at_k(
         if not relevant:
             continue  # user tanpa item relevant di test set diabaikan (standar praktik)
 
+        # Dedup ranked_items sambil pertahankan urutan (skor tertinggi lebih
+        # dulu) -- test set bisa punya >1 baris user-item yang sama (mis.
+        # user me-review ulang produk/hotel yang sama). Tanpa dedup, item
+        # relevant yang duplikat di top_k dihitung sbg hit berkali-kali,
+        # padahal relevant itu sendiri sebuah set (unik) -- recall/NDCG jadi
+        # bisa >1.0, melanggar batas teoretis metrik itu sendiri. precision
+        # tidak kena masalah ini karena pembaginya k (tetap), bukan
+        # len(relevant).
+        ranked_items = list(dict.fromkeys(ranked_items))
+
         for k in k_values:
             top_k = ranked_items[:k]
             hits = [1 if item in relevant else 0 for item in top_k]
