@@ -1,0 +1,23 @@
+# configs/tripadvisor_hotel_config_quicktest_colab.yaml
+#
+# Versi Colab dari tripadvisor_hotel_config_quicktest.yaml -- path menunjuk ke Google Drive.
+# Mount Drive dulu di notebook sebelum menjalankan:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+_base: tripadvisor_hotel_config_quicktest.yaml
+
+experiment:
+  name: "tripadvisor_hotel_quicktest_smoke_run_colab"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/tripadvisor_hotel/tripadvisor_hotel_subset_5k.csv"
+
+split:
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/tripadvisor_hotel_quicktest"
+
+sentiment_baseline:
+  batch_size: 32
+
+logging:
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/tripadvisor_hotel_quicktest"

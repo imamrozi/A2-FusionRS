@@ -71,6 +71,11 @@ class ItemFeatureBuilder:
         - review_count, avg_rating: metrik popularitas
         """
         cat_features = self.mlb.fit_transform(item_df["categories_list"])
+        if cat_features.shape[1] == 0:
+            logger.info(
+                "categories_list kosong utk semua item (domain tanpa metadata kategori, "
+                "mis. Amazon/TripAdvisor) -- fitur kategori 0-dim, CBF mundur ke TF-IDF+numerik saja."
+            )
         tfidf_features = self.tfidf.fit_transform(item_df["description_text"]).toarray()
 
         numeric_cols = ["sentiment_agg", "review_count", "avg_rating"]

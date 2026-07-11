@@ -1,0 +1,13 @@
+# configs/amazon_electronics_config_absa_confidence.yaml
+# Varian ablasi ABSA ("absa_confidence_ablation") utk domain amazon_electronics. PRASYARAT: jalankan
+# run_baseline.py dengan amazon_electronics_config.yaml SEKALI dulu sampai tahap 4
+# selesai (checkpoint model SA harus sudah ada -- di-reuse via run_baseline_absa.py).
+
+_base: amazon_electronics_config.yaml
+
+experiment:
+  name: "amazon_electronics_absa_confidence_ablation"
+
+absa:
+  mode: "confidence_mean"
+  aggregation: "mean"

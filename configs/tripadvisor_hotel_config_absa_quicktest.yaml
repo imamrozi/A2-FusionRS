@@ -1,0 +1,12 @@
+# configs/tripadvisor_hotel_config_absa_quicktest.yaml
+# Smoke test dari tripadvisor_hotel_config_absa.yaml pada subset kecil.
+# PRASYARAT: jalankan run_baseline.py --config tripadvisor_hotel_config_quicktest.yaml
+# SEKALI dulu sampai tahap 4 selesai.
+
+_base: tripadvisor_hotel_config_quicktest.yaml
+
+experiment:
+  name: "tripadvisor_hotel_absa_ablation_quicktest"
+
+absa:
+  aggregation: "mean"

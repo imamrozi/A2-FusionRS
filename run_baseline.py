@@ -28,7 +28,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-import yaml
 
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
 from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
@@ -38,7 +37,8 @@ from src.baseline.sentiment_bert import (
     SentimentBertConfig,
     derive_sentiment_label,
 )
-from src.data_loader import YelpDatasetLoader
+from src.config_utils import load_config
+from src.data_loader import get_loader_class
 from src.evaluation.metrics import (
     compute_rmse_mae,
     precision_recall_ndcg_at_k,
@@ -53,11 +53,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-
-def load_config(path: str) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
 
 
 def run_pipeline(config: dict) -> None:
@@ -76,7 +71,8 @@ def run_pipeline(config: dict) -> None:
 
     # ---------- 1. Load data ----------
     logger.info("=== Tahap 1: Memuat data ===")
-    loader = YelpDatasetLoader(data_cfg["raw_path"], domain=exp_cfg["domain"])
+    loader_cls = get_loader_class(data_cfg.get("loader", "yelp"))
+    loader = loader_cls(data_cfg["raw_path"], domain=exp_cfg["domain"])
     df = loader.load()
     df = loader.filter_min_interactions(
         df,

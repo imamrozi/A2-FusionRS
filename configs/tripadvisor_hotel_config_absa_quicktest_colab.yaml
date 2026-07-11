@@ -1,0 +1,10 @@
+# configs/tripadvisor_hotel_config_absa_quicktest_colab.yaml
+# Versi Colab dari tripadvisor_hotel_config_absa_quicktest.yaml.
+
+_base: tripadvisor_hotel_config_quicktest_colab.yaml
+
+experiment:
+  name: "tripadvisor_hotel_absa_ablation_quicktest_colab"
+
+absa:
+  aggregation: "mean"

@@ -1,0 +1,11 @@
+# configs/amazon_electronics_config_absa_concat_confidence_colab.yaml
+# Versi Colab dari amazon_electronics_config_absa_concat_confidence.yaml.
+
+_base: amazon_electronics_config_colab.yaml
+
+experiment:
+  name: "amazon_electronics_absa_concat_confidence_ablation_colab"
+
+absa:
+  mode: "concat_confidence"
+  aggregation: "mean"

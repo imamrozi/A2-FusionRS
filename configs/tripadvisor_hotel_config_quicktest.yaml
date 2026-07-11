@@ -1,0 +1,54 @@
+# configs/tripadvisor_hotel_config_quicktest.yaml
+# Smoke test end-to-end pada subset kecil (~5.000 baris, hasil
+# scripts/make_subset.py --loader tripadvisor). Sama tujuannya dgn
+# yelp_config_quicktest.yaml -- verifikasi tahap 1-8 run_baseline.py
+# berjalan tanpa error, BUKAN angka RMSE yang dilaporkan di manuskrip.
+
+_base: tripadvisor_hotel_config.yaml
+
+experiment:
+  name: "tripadvisor_hotel_quicktest_smoke_run"
+
+data:
+  raw_path: "data/raw/tripadvisor_hotel/tripadvisor_hotel_subset_5k.csv"   # hasil make_subset.py --loader tripadvisor
+  # 2 (bukan 3 spt domain lain) -- TripAdvisor jauh lebih sparse per-item
+  # (lihat catatan tuning subsampling Amazon Electronics); subset quicktest
+  # kecil butuh threshold lebih longgar spy tidak collapse jadi 0 baris.
+  min_reviews_per_user: 2
+  min_reviews_per_item: 2
+
+split:
+  output_dir: "data/splits/tripadvisor_hotel_quicktest"
+
+preprocessing:
+  max_seq_length: 128
+
+sentiment_baseline:
+  batch_size: 4
+  epochs: 1
+
+deepmf:
+  embedding_dim: 32
+  hidden_layers: [64, 32, 16]
+  batch_size: 64
+
+cbf_clustering:
+  pca_components: 20
+
+fusion_baseline:
+  nmf_components: 3
+  dt_max_depth: 5
+
+classical_cf:
+  item_knn:
+    knn_k: 10
+  svd:
+    svd_n_factors: 20
+    svd_n_epochs: 5
+
+evaluation:
+  k_values: [3, 5]
+  n_seeds: 1
+
+logging:
+  checkpoint_dir: "checkpoints/tripadvisor_hotel_quicktest"

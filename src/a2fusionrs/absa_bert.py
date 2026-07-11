@@ -57,6 +57,40 @@ DEFAULT_ASPECT_KEYWORDS: dict[str, dict[str, list[str]]] = {
         "price": ["price", "expensive", "cheap", "affordable", "overpriced", "value", "worth"],
         "cleanliness": ["clean", "dirty", "spotless", "smell", "hygiene", "housekeeping"],
     },
+    "amazon_electronics": {
+        "quality_durability": [
+            "quality", "durable", "durability", "sturdy", "broke", "broken", "cheaply made",
+            "well built", "flimsy", "fell apart",
+        ],
+        "price_value": [
+            "price", "expensive", "cheap", "affordable", "overpriced", "value", "worth",
+            "bang for the buck", "money",
+        ],
+        "shipping_packaging": [
+            "shipping", "delivery", "arrived", "package", "packaging", "box", "damaged in transit",
+            "delayed", "fast shipping",
+        ],
+        "ease_of_use": [
+            "easy to use", "setup", "install", "installation", "instructions", "user friendly",
+            "intuitive", "complicated", "manual",
+        ],
+        "customer_service": [
+            "customer service", "support", "warranty", "return", "refund", "replacement",
+            "response", "seller",
+        ],
+    },
+    # Taksonomi aspek diambil langsung dari field `ratings` dataset TripAdvisor
+    # (joebeachcapital/hotel-reviews, lihat riset skema di plan) -- 6 aspek
+    # dgn coverage >50% dari 878.561 review riil, BUKAN tebakan/duplikat
+    # entry "hotel" Yelp seperti rencana awal.
+    "tripadvisor_hotel": {
+        "cleanliness": ["clean", "dirty", "dusty", "spotless", "smell", "stain", "hygiene", "tidy"],
+        "service": ["service", "staff", "receptionist", "friendly", "helpful", "rude", "attentive"],
+        "value": ["value", "price", "expensive", "cheap", "affordable", "overpriced", "worth"],
+        "location": ["location", "close to", "nearby", "walking distance", "downtown", "far from"],
+        "rooms": ["room", "bed", "bathroom", "shower", "spacious", "view", "furniture"],
+        "sleep_quality": ["sleep", "noisy", "quiet", "comfortable bed", "mattress", "pillow", "noise"],
+    },
 }
 
 

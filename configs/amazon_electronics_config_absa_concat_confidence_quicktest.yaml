@@ -1,0 +1,13 @@
+# configs/amazon_electronics_config_absa_concat_confidence_quicktest.yaml
+# Smoke test dari amazon_electronics_config_absa_concat_confidence.yaml pada subset kecil.
+# PRASYARAT: jalankan run_baseline.py --config amazon_electronics_config_quicktest.yaml
+# SEKALI dulu sampai tahap 4 selesai.
+
+_base: amazon_electronics_config_quicktest.yaml
+
+experiment:
+  name: "amazon_electronics_absa_concat_confidence_ablation_quicktest"
+
+absa:
+  mode: "concat_confidence"
+  aggregation: "mean"

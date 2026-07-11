@@ -1,0 +1,95 @@
+# configs/tripadvisor_hotel_config.yaml
+# Konfigurasi eksperimen Fase 1 (replikasi baseline + ablasi ABSA) pada
+# domain TripAdvisor Hotel -- generalisasi dari domain Yelp restoran/hotel,
+# memakai pipeline yang SAMA (dataset-agnostic). Sumber: Kaggle
+# joebeachcapital/hotel-reviews (lihat prepare_tripadvisor_dataset.py).
+#
+# File ini adalah BASIS (bukan `_base:` child) -- config lain domain
+# TripAdvisor (quicktest/colab/absa varian) mewarisi dari file ini via
+# `_base: tripadvisor_hotel_config.yaml` (src/config_utils.py).
+
+experiment:
+  name: "tripadvisor_hotel_baseline_reimplementation"
+  seed: 42
+  domain: "tripadvisor_hotel"
+
+data:
+  loader: "tripadvisor"    # dispatch ke TripAdvisorDatasetLoader (src/data_loader.py::LOADER_REGISTRY)
+  raw_path: "data/raw/tripadvisor_hotel/tripadvisor_hotel_reviews.csv"   # hasil prepare_tripadvisor_dataset.py
+  # business_stars (hotel_class) & business_city (address.locality) TERSEDIA
+  # (di-join saat flatten) -- business_categories/business_review_count/
+  # reviewer_review_count/reviewer_average_stars TIDAK tersedia di sumber ini.
+  business_attributes_required: ["business_stars", "business_city"]
+  min_reviews_per_user: 5
+  min_reviews_per_item: 5
+
+split:
+  strategy: "user_based"
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  cold_start_holdout: true
+  output_dir: "data/splits/tripadvisor_hotel"
+
+preprocessing:
+  lowercase: true
+  remove_stopwords: true
+  lemmatize: true
+  max_seq_length: 128
+  tokenizer: "bert-base-uncased"
+
+sentiment_baseline:
+  model_name: "bert-base-uncased"
+  mode: "global"
+  optimizer: "AdamW"
+  learning_rate: 1.0e-5
+  batch_size: 16
+  epochs: 3
+  max_grad_norm: 1.0
+
+deepmf:
+  embedding_dim: 128
+  hidden_layers: [256, 128, 64, 32]
+  dropout: 0.3
+  batch_size: 512
+  learning_rate: 0.001
+  negative_sampling_ratio: 0
+  loss: "mse"
+  optimizer: "sgd"
+
+cbf_clustering:
+  method: "agglomerative"   # sesuai baseline: Agglomerative utk domain hotel (KMeans utk restoran)
+  k_selection: "elbow"
+  # category_onehot otomatis 0-dim (tidak ada business_categories di domain
+  # ini) -- CBF tetap jalan via tfidf_description + sentiment_agg +
+  # popularity_metrics (lihat log diagnostik baru di cbf_clustering.py).
+  feature_sources: ["category_onehot", "tfidf_description", "sentiment_agg", "popularity_metrics"]
+  pca_components: 50
+
+fusion_baseline:
+  method: "nmf_decision_tree"
+  nmf_components: 3
+  dt_max_depth: 10
+
+classical_cf:
+  algorithms: ["item_knn", "svd"]
+  item_knn:
+    knn_k: 40
+    knn_min_k: 1
+    knn_sim_name: "cosine"
+    knn_user_based: false
+  svd:
+    svd_n_factors: 100
+    svd_n_epochs: 20
+    svd_lr_all: 0.005
+    svd_reg_all: 0.02
+
+evaluation:
+  metrics: ["rmse", "mae", "precision_at_k", "recall_at_k", "ndcg_at_k"]
+  k_values: [5, 10, 20]
+  n_seeds: 3
+  significance_test: "wilcoxon"
+
+logging:
+  checkpoint_dir: "checkpoints/tripadvisor_hotel"
+  save_every_stage: true

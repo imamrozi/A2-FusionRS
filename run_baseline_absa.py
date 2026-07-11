@@ -40,13 +40,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-import yaml
 
 from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
 from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
 from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
 from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
+from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,
     precision_recall_ndcg_at_k,
@@ -61,11 +61,6 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-
-
-def load_config(path: str) -> dict:
-    with open(path) as f:
-        return yaml.safe_load(f)
 
 
 def run_pipeline(config: dict) -> None:

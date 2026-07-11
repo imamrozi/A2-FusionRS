@@ -1,0 +1,23 @@
+# configs/amazon_electronics_config_quicktest_colab.yaml
+#
+# Versi Colab dari amazon_electronics_config_quicktest.yaml -- path menunjuk ke Google Drive.
+# Mount Drive dulu di notebook sebelum menjalankan:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+_base: amazon_electronics_config_quicktest.yaml
+
+experiment:
+  name: "amazon_electronics_quicktest_smoke_run_colab"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/amazon_electronics/amazon_electronics_subset_5k.csv"
+
+split:
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/amazon_electronics_quicktest"
+
+sentiment_baseline:
+  batch_size: 32
+
+logging:
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/amazon_electronics_quicktest"

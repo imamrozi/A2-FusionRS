@@ -1,0 +1,24 @@
+# configs/amazon_electronics_config_colab.yaml
+#
+# Versi Colab dari amazon_electronics_config.yaml -- path menunjuk ke Google Drive.
+# Mount Drive dulu di notebook sebelum menjalankan:
+#   from google.colab import drive
+#   drive.mount('/content/drive')
+
+_base: amazon_electronics_config.yaml
+
+experiment:
+  name: "amazon_electronics_baseline_reimplementation_colab"
+
+data:
+  raw_path: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/raw/amazon_electronics/amazon_electronics_reviews.csv"
+
+split:
+  output_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/data/splits/amazon_electronics"
+
+sentiment_baseline:
+  # Dinaikkan dari versi CPU lokal -- aman utk GPU T4/L4 dgn max_seq_length=128.
+  batch_size: 32
+
+logging:
+  checkpoint_dir: "/content/drive/MyDrive/PHD-STUDENT/Code/A2-FusionRS/checkpoints/amazon_electronics"

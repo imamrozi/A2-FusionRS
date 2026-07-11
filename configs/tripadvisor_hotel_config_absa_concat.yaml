@@ -1,0 +1,13 @@
+# configs/tripadvisor_hotel_config_absa_concat.yaml
+# Varian ablasi ABSA ("absa_concat_ablation") utk domain tripadvisor_hotel. PRASYARAT: jalankan
+# run_baseline.py dengan tripadvisor_hotel_config.yaml SEKALI dulu sampai tahap 4
+# selesai (checkpoint model SA harus sudah ada -- di-reuse via run_baseline_absa.py).
+
+_base: tripadvisor_hotel_config.yaml
+
+experiment:
+  name: "tripadvisor_hotel_absa_concat_ablation"
+
+absa:
+  mode: "concat"
+  aggregation: "mean"

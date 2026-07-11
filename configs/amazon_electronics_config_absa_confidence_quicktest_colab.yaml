@@ -1,0 +1,11 @@
+# configs/amazon_electronics_config_absa_confidence_quicktest_colab.yaml
+# Versi Colab dari amazon_electronics_config_absa_confidence_quicktest.yaml.
+
+_base: amazon_electronics_config_quicktest_colab.yaml
+
+experiment:
+  name: "amazon_electronics_absa_confidence_ablation_quicktest_colab"
+
+absa:
+  mode: "confidence_mean"
+  aggregation: "mean"

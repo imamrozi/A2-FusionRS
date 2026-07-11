@@ -1,0 +1,55 @@
+# configs/amazon_electronics_config_quicktest.yaml
+# Smoke test end-to-end pada subset kecil (~5.000 baris, hasil
+# scripts/make_subset.py --loader amazon). Sama tujuannya dgn
+# yelp_config_quicktest.yaml -- verifikasi tahap 1-8 run_baseline.py
+# berjalan tanpa error, BUKAN angka RMSE yang dilaporkan di manuskrip.
+#
+# Pakai config inheritance (src/config_utils.py): cuma override field yang
+# perlu diperkecil/diarahkan ke subset, sisanya diwarisi dari
+# amazon_electronics_config.yaml.
+
+_base: amazon_electronics_config.yaml
+
+experiment:
+  name: "amazon_electronics_quicktest_smoke_run"
+
+data:
+  raw_path: "data/raw/amazon_electronics/amazon_electronics_subset_5k.csv"   # hasil make_subset.py --loader amazon
+  min_reviews_per_user: 3
+  min_reviews_per_item: 3
+
+split:
+  output_dir: "data/splits/amazon_electronics_quicktest"
+
+preprocessing:
+  max_seq_length: 128
+
+sentiment_baseline:
+  batch_size: 4
+  epochs: 1
+
+deepmf:
+  embedding_dim: 32
+  hidden_layers: [64, 32, 16]
+  batch_size: 64
+
+cbf_clustering:
+  pca_components: 20
+
+fusion_baseline:
+  nmf_components: 3
+  dt_max_depth: 5
+
+classical_cf:
+  item_knn:
+    knn_k: 10
+  svd:
+    svd_n_factors: 20
+    svd_n_epochs: 5
+
+evaluation:
+  k_values: [3, 5]
+  n_seeds: 1
+
+logging:
+  checkpoint_dir: "checkpoints/amazon_electronics_quicktest"
