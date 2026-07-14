@@ -23,6 +23,9 @@ results/
 *.bin
 # Metadata cache PyABSA (auto-generated di cwd saat AspectExtractor dipakai)
 /checkpoints.json
+# Checkpoint pretrained PyABSA hasil download manual (besar, sudah diupload ke
+# Google Drive user -- lihat phase2_notes/pyabsa_investigation.md Lampiran B)
+phase2_notes/pyabsa_checkpoint_download/
 
 # ============================================================
 # Virtual environment (venv lokal Windows/Mac/Linux)
