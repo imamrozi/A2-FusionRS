@@ -21,6 +21,8 @@ results/
 *.pth
 *.safetensors
 *.bin
+# Metadata cache PyABSA (auto-generated di cwd saat AspectExtractor dipakai)
+/checkpoints.json
 
 # ============================================================
 # Virtual environment (venv lokal Windows/Mac/Linux)
