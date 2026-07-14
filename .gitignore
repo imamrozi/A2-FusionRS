@@ -61,6 +61,11 @@ Thumbs.db
 .idea/
 *.swp
 
+# File lock sementara Microsoft Office (dibuat otomatis saat file dibuka)
+~$*.xlsx
+~$*.docx
+~$*.pptx
+
 # ============================================================
 # Logs
 # ============================================================

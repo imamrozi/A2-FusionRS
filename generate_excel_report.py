@@ -7,10 +7,11 @@ checkpoints/results/ (manuscript_table_*.csv, YAML per-seed, predictions
 per-seed CSV) -- TIDAK menjalankan eksperimen baru, murni menyusun ulang
 data yang sudah tervalidasi (lihat manuscript/A2-IRM_manuscript_draft.md).
 
-8 sheet, 2 tingkatan:
-  - Tier "Wajib" (Sheet 1-3): ringkasan eksekutif, hasil utama RMSE/MAE,
-    perbandingan hybrid vs CF klasik -- cukup dibaca utk memahami kesimpulan.
-  - Tier "Lampiran" (Sheet 4-7): signifikansi statistik, stabilitas/varian,
+9 sheet, 2 tingkatan:
+  - Tier "Wajib" (Sheet 1-4): ringkasan eksekutif, fokus baseline vs model
+    terbaik (klaim inti), hasil utama RMSE/MAE, perbandingan hybrid vs CF
+    klasik -- cukup dibaca utk memahami kesimpulan.
+  - Tier "Lampiran" (Sheet 5-8): signifikansi statistik, stabilitas/varian,
     data mentah per-seed, karakteristik dataset & hyperparameter -- dibuka
     kalau ingin menelusuri detail/verifikasi.
 
@@ -329,8 +330,8 @@ def build_sheet_0_sampul(wb: Workbook) -> None:
     ws.cell(row=r, column=1, value="CARA MEMBACA FILE INI").font = Font(bold=True, size=13)
     r += 1
     ws.cell(row=r, column=1,
-            value="Untuk kesimpulan, cukup baca Sheet 1-3 (tab warna HIJAU). "
-                  "Sheet 4 ke bawah (tab warna ABU-ABU) adalah lampiran teknis, "
+            value="Untuk kesimpulan, cukup baca Sheet 1-4 (tab warna HIJAU). "
+                  "Sheet 5 ke bawah (tab warna ABU-ABU) adalah lampiran teknis, "
                   "tersedia kalau ingin menelusuri detail atau ada pertanyaan verifikasi.")
     ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
     ws.row_dimensions[r].height = 40
@@ -340,12 +341,13 @@ def build_sheet_0_sampul(wb: Workbook) -> None:
     r += 1
     toc = [
         ("1_Ringkasan_Eksekutif", "[WAJIB] Temuan utama + chart headline"),
-        ("2_Hasil_Utama_RMSE_MAE", "[WAJIB] Tabel RMSE/MAE lengkap 7 model x 3 domain"),
-        ("3_Hybrid_vs_CF_Klasik", "[WAJIB] Bukti model hybrid mengungguli CF klasik"),
-        ("4_Signifikansi_Statistik", "[Lampiran] Detail uji Wilcoxon per seed"),
-        ("5_Stabilitas_Variansi", "[Lampiran] Analisis stabilitas antar-seed"),
-        ("6_Data_Mentah_PerSeed", "[Lampiran] 105 baris data mentah per-seed"),
-        ("7_Dataset_dan_Hyperparameter", "[Lampiran] Karakteristik dataset & hyperparameter"),
+        ("2_Baseline_vs_Concat_Confidence", "[WAJIB] Fokus: baseline vs model terbaik (bukti klaim inti)"),
+        ("3_Hasil_Utama_RMSE_MAE", "[WAJIB] Tabel RMSE/MAE lengkap 7 model x 3 domain"),
+        ("4_Hybrid_vs_CF_Klasik", "[WAJIB] Bukti model hybrid mengungguli CF klasik"),
+        ("5_Signifikansi_Statistik", "[Lampiran] Detail uji Wilcoxon per seed"),
+        ("6_Stabilitas_Variansi", "[Lampiran] Analisis stabilitas antar-seed"),
+        ("7_Data_Mentah_PerSeed", "[Lampiran] 105 baris data mentah per-seed"),
+        ("8_Dataset_dan_Hyperparameter", "[Lampiran] Karakteristik dataset & hyperparameter"),
     ]
     for sheet_name, desc in toc:
         cell = ws.cell(row=r, column=1, value=f"-> {sheet_name}: {desc}")
@@ -447,8 +449,93 @@ def build_sheet_1_ringkasan(wb: Workbook, manuscript_df: pd.DataFrame) -> None:
     autosize_columns(ws, max_width=55)
 
 
-def build_sheet_2_hasil_utama(wb: Workbook, manuscript_df: pd.DataFrame) -> None:
-    ws = wb.create_sheet("2_Hasil_Utama_RMSE_MAE")
+def build_sheet_2_baseline_vs_best(wb: Workbook, manuscript_df: pd.DataFrame, stability_df: pd.DataFrame) -> None:
+    """Fokus SATU perbandingan: baseline vs ABSA Concat+Confidence (klaim inti
+    penelitian) -- mengisolasi RMSE, MAE, signifikansi, DAN stabilitas dari
+    perbandingan ini saja, supaya tidak perlu loncat antar Sheet 3/5/6."""
+    ws = wb.create_sheet("2_Baseline_vs_Concat_Confidence")
+    set_tab_color(ws, FILL_TIER_WAJIB)
+
+    r = 1
+    ws.cell(row=r, column=1, value="Fokus: Baseline vs Model Terbaik (ABSA Concat + Confidence)").font = Font(bold=True, size=13)
+    r += 1
+    ws.cell(row=r, column=1,
+            value="Perbandingan ini adalah klaim inti penelitian -- satu-satunya varian ABSA yang "
+                  "signifikan mengalahkan baseline di ketiga domain, sekaligus paling stabil antar-seed.")
+    ws.cell(row=r, column=1).font = Font(italic=True, size=9, color="595959")
+    ws.cell(row=r, column=1).alignment = Alignment(wrap_text=True)
+    r += 2
+
+    rows = []
+    for domain in DOMAIN_ORDER:
+        dom_df = manuscript_df[manuscript_df["domain"] == domain].set_index("model_prefix")
+        base = dom_df.loc["baseline_reimpl"]
+        best = dom_df.loc["absa_ablation_concat_confidence"]
+        stab_df = stability_df[stability_df["domain"] == domain].set_index("model_prefix")
+        sd_base = stab_df.loc["baseline_reimpl", "sd_5_seed"]
+        sd_best = stab_df.loc["absa_ablation_concat_confidence", "sd_5_seed"]
+        rows.append({
+            "Domain": DOMAIN_LABEL[domain],
+            "RMSE_Baseline": round(float(base["rmse_mean"]), 4),
+            "RMSE_ConcatConf": round(float(best["rmse_mean"]), 4),
+            "Delta_RMSE_%": round(float((base["rmse_mean"] - best["rmse_mean"]) / base["rmse_mean"] * 100), 1),
+            "MAE_Baseline": round(float(base["mae_mean"]), 4),
+            "MAE_ConcatConf": round(float(best["mae_mean"]), 4),
+            "Delta_MAE_%": round(float((base["mae_mean"] - best["mae_mean"]) / base["mae_mean"] * 100), 1),
+            "SD_Baseline": round(float(sd_base), 4),
+            "SD_ConcatConf": round(float(sd_best), 4),
+            "Faktor_Lebih_Stabil": round(float(sd_base / sd_best), 1) if sd_best > 0 else None,
+            "Seed_Signifikan": best["n_significant_seeds"],
+            "P_Value_Fisher": best["p_value_combined_fisher"],
+        })
+    table_df = pd.DataFrame(rows)
+    table_start = r
+    table_end = write_dataframe(ws, table_df, r)
+    for col_letter in ["B", "C", "E", "F", "H", "I"]:
+        apply_number_format(ws, col_letter, table_start + 1, table_end, "0.0000")
+    for col_letter in ["D", "G", "J"]:
+        apply_number_format(ws, col_letter, table_start + 1, table_end, "0.0")
+    apply_number_format(ws, "L", table_start + 1, table_end, "0.00E+00")
+    r = table_end + 2
+
+    # data pendukung chart: RMSE & MAE baseline vs best, 3 domain
+    ws.cell(row=r, column=1, value="(Data pendukung grafik -- jangan diedit)").font = Font(italic=True, size=8, color="A6A6A6")
+    r += 1
+    chart_header_row = r
+    ws.cell(row=r, column=1, value="Domain")
+    ws.cell(row=r, column=2, value="RMSE Baseline")
+    ws.cell(row=r, column=3, value="RMSE Concat+Confidence")
+    ws.cell(row=r, column=4, value="MAE Baseline")
+    ws.cell(row=r, column=5, value="MAE Concat+Confidence")
+    r += 1
+    chart_data_start = r
+    for _, row in table_df.iterrows():
+        ws.cell(row=r, column=1, value=row["Domain"])
+        ws.cell(row=r, column=2, value=row["RMSE_Baseline"])
+        ws.cell(row=r, column=3, value=row["RMSE_ConcatConf"])
+        ws.cell(row=r, column=4, value=row["MAE_Baseline"])
+        ws.cell(row=r, column=5, value=row["MAE_ConcatConf"])
+        r += 1
+    chart_data_end = r - 1
+
+    chart = BarChart()
+    chart.type = "col"
+    chart.style = 10
+    chart.title = "RMSE & MAE: Baseline vs ABSA Concat+Confidence"
+    chart.y_axis.title = "Error (RMSE / MAE)"
+    chart.x_axis.title = "Domain"
+    data = Reference(ws, min_col=2, max_col=5, min_row=chart_header_row, max_row=chart_data_end)
+    cats = Reference(ws, min_col=1, min_row=chart_data_start, max_row=chart_data_end)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(cats)
+    chart.width, chart.height = 24, 12
+    ws.add_chart(chart, f"A{chart_data_end + 2}")
+
+    autosize_columns(ws)
+
+
+def build_sheet_3_hasil_utama(wb: Workbook, manuscript_df: pd.DataFrame) -> None:
+    ws = wb.create_sheet("3_Hasil_Utama_RMSE_MAE")
     set_tab_color(ws, FILL_TIER_WAJIB)
 
     display = manuscript_df.copy()
@@ -529,8 +616,8 @@ def build_sheet_2_hasil_utama(wb: Workbook, manuscript_df: pd.DataFrame) -> None
     autosize_columns(ws)
 
 
-def build_sheet_3_hybrid_vs_cf(wb: Workbook, manuscript_df: pd.DataFrame) -> None:
-    ws = wb.create_sheet("3_Hybrid_vs_CF_Klasik")
+def build_sheet_4_hybrid_vs_cf(wb: Workbook, manuscript_df: pd.DataFrame) -> None:
+    ws = wb.create_sheet("4_Hybrid_vs_CF_Klasik")
     set_tab_color(ws, FILL_TIER_WAJIB)
 
     rows = []
@@ -596,8 +683,8 @@ def build_sheet_3_hybrid_vs_cf(wb: Workbook, manuscript_df: pd.DataFrame) -> Non
     autosize_columns(ws)
 
 
-def build_sheet_4_signifikansi(wb: Workbook, sig_df: pd.DataFrame) -> None:
-    ws = wb.create_sheet("4_Signifikansi_Statistik")
+def build_sheet_5_signifikansi(wb: Workbook, sig_df: pd.DataFrame) -> None:
+    ws = wb.create_sheet("5_Signifikansi_Statistik")
     set_tab_color(ws, FILL_TIER_LAMPIRAN)
 
     display = sig_df.copy()
@@ -639,8 +726,8 @@ def build_sheet_4_signifikansi(wb: Workbook, sig_df: pd.DataFrame) -> None:
     autosize_columns(ws)
 
 
-def build_sheet_5_stabilitas(wb: Workbook, stability_df: pd.DataFrame) -> None:
-    ws = wb.create_sheet("5_Stabilitas_Variansi")
+def build_sheet_6_stabilitas(wb: Workbook, stability_df: pd.DataFrame) -> None:
+    ws = wb.create_sheet("6_Stabilitas_Variansi")
     set_tab_color(ws, FILL_TIER_LAMPIRAN)
 
     display = stability_df.copy()
@@ -717,8 +804,8 @@ def build_sheet_5_stabilitas(wb: Workbook, stability_df: pd.DataFrame) -> None:
     autosize_columns(ws)
 
 
-def build_sheet_6_data_mentah(wb: Workbook, raw_df: pd.DataFrame) -> None:
-    ws = wb.create_sheet("6_Data_Mentah_PerSeed")
+def build_sheet_7_data_mentah(wb: Workbook, raw_df: pd.DataFrame) -> None:
+    ws = wb.create_sheet("7_Data_Mentah_PerSeed")
     set_tab_color(ws, FILL_TIER_LAMPIRAN)
 
     display = raw_df.copy()
@@ -750,8 +837,8 @@ def build_sheet_6_data_mentah(wb: Workbook, raw_df: pd.DataFrame) -> None:
     autosize_columns(ws)
 
 
-def build_sheet_7_dataset_hyperparam(wb: Workbook, hp_df: pd.DataFrame) -> None:
-    ws = wb.create_sheet("7_Dataset_dan_Hyperparameter")
+def build_sheet_8_dataset_hyperparam(wb: Workbook, hp_df: pd.DataFrame) -> None:
+    ws = wb.create_sheet("8_Dataset_dan_Hyperparameter")
     set_tab_color(ws, FILL_TIER_LAMPIRAN)
 
     r = 1
@@ -821,17 +908,18 @@ def main() -> None:
     logger.info("Mengekstrak hyperparameter dari config_snapshot ...")
     hp_df = extract_hyperparameters(results_dir)
 
-    logger.info("Menyusun workbook 8 sheet ...")
+    logger.info("Menyusun workbook 9 sheet ...")
     wb = Workbook()
     del wb["Sheet"]
     build_sheet_0_sampul(wb)
     build_sheet_1_ringkasan(wb, manuscript_df)
-    build_sheet_2_hasil_utama(wb, manuscript_df)
-    build_sheet_3_hybrid_vs_cf(wb, manuscript_df)
-    build_sheet_4_signifikansi(wb, sig_df)
-    build_sheet_5_stabilitas(wb, stability_df)
-    build_sheet_6_data_mentah(wb, raw_df)
-    build_sheet_7_dataset_hyperparam(wb, hp_df)
+    build_sheet_2_baseline_vs_best(wb, manuscript_df, stability_df)
+    build_sheet_3_hasil_utama(wb, manuscript_df)
+    build_sheet_4_hybrid_vs_cf(wb, manuscript_df)
+    build_sheet_5_signifikansi(wb, sig_df)
+    build_sheet_6_stabilitas(wb, stability_df)
+    build_sheet_7_data_mentah(wb, raw_df)
+    build_sheet_8_dataset_hyperparam(wb, hp_df)
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
