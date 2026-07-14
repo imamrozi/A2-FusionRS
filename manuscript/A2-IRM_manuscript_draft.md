@@ -19,7 +19,7 @@ Hybrid recommender systems that integrate collaborative filtering, content-based
 
 ## I. Introduction
 
-Recommender systems that rely solely on the numeric rating in a user–item interaction discard a large fraction of the information a review actually contains. A one-star hotel review complaining exclusively about noisy air conditioning and a one-star review complaining about rude staff carry the same numeric signal but very different implications for what the system should recommend next. This observation has motivated a substantial body of work on integrating sentiment analysis into collaborative and content-based filtering [1]–[3], most recently through pretrained transformer language models such as BERT, which substantially outperform lexicon-based sentiment tools (VADER, TextBlob, SentiWordNet) on review text [4], [5].
+Recommender systems that rely solely on the numeric rating in a user–item interaction discard a large fraction of the information a review actually contains. A one-star hotel review complaining exclusively about noisy air conditioning and a one-star review complaining about rude staff carry the same numeric signal but very different implications for what the system should recommend next. This observation has motivated a substantial body of work on integrating sentiment analysis into collaborative and content-based filtering [1]–[3], most recently through pretrained transformer language models such as BERT [23], which substantially outperform lexicon-based sentiment tools (VADER, TextBlob, SentiWordNet) on review text [4], [5].
 
 Darraz et al. [6] recently proposed a hybrid architecture that integrates a fine-tuned BERT sentiment classifier, deep matrix factorization (DeepMF) for collaborative filtering, and K-means/agglomerative clustering for content-based filtering, combining the three signals through non-negative matrix factorization (NMF) followed by a DecisionTreeRegressor. Evaluated on Yelp restaurant and hotel reviews, the architecture reports substantial RMSE reductions from sentiment integration. This design is representative of a broader pattern in the literature [7]–[12]: sentiment analysis is computed once per review as a single global polarity or intensity score, then fused with collaborative and content-based signals as one additional feature.
 
@@ -81,7 +81,15 @@ We additionally report two non-hybrid classical collaborative filtering baseline
 
 ### C. Aspect-Based Sentiment Fusion Variants
 
-We replace the global sentiment stream with an aspect-based sentiment analysis (ABSA) module that reuses the same fine-tuned BERT classifier as the baseline — no additional model training is introduced — but restructures how it is applied and how its output is fed into the fusion stage. For each review, sentences are matched against a domain-specific keyword lexicon (Table II); a review with no sentence matching any aspect keyword falls back to a single whole-review score, so that every review contributes at least one signal regardless of coverage. Matched sentences for a given aspect are concatenated and scored by the sentiment classifier; a per-aspect confidence value is derived from the classifier's decision margin and the number of matched sentences.
+We replace the global sentiment stream with an aspect-based sentiment analysis (ABSA) module that reuses the same fine-tuned BERT [23] classifier as the baseline — no additional model training is introduced — but restructures how it is applied and how its output is fed into the fusion stage. For each review, sentences are matched against a domain-specific keyword lexicon (Table II); a review with no sentence matching any aspect keyword falls back to a single whole-review score, so that every review contributes at least one signal regardless of coverage.
+
+**Notation.** Let $\mathcal{A} = \{a_1, \ldots, a_K\}$ denote a domain's fixed aspect set ($K \in \{4, 5, 6\}$, Table II), and let $A(r) \subseteq \mathcal{A}$ denote the aspects matched in review $r$. For $a \in A(r)$, let $\hat{s}(a, r) \in [0,1]$ be the BERT sentiment score computed on the concatenation of sentences matched to aspect $a$, and let $n(a,r)$ be the number of such matched sentences. Let $s_0(r) \in [0,1]$ denote the whole-review fallback score, computed by the same classifier on the full review text and used whenever a specific aspect (or the entire review) has no keyword match.
+
+For $a \in A(r)$, a per-aspect confidence combines a margin-based term with an evidence-count term:
+
+$$c(a,r) = \max\left(\frac{\overbrace{|2\hat{s}(a,r) - 1|}^{\text{score margin}} + \overbrace{\min\!\left(n(a,r)/3,\ 1\right)}^{\text{evidence count}}}{2},\ 0.05\right) \tag{1}$$
+
+The margin term is largest when $\hat{s}(a,r)$ is close to 0 or 1 (a decisive polarity) and smallest near 0.5 (ambiguous); the evidence term grows with the number of matched sentences, capped at 3; the 0.05 floor keeps every aspect contributing a non-zero minimum weight rather than being discarded outright. This is a lightweight heuristic specific to this pipeline — it is not drawn from prior work, and reuses scores already computed by the classifier rather than requiring a separate calibration model.
 
 **Table II. Aspect keyword taxonomies used for ABSA sentence matching.**
 
@@ -93,10 +101,25 @@ We replace the global sentiment stream with an aspect-based sentiment analysis (
 
 The hotel taxonomy is taken directly from TripAdvisor's own sub-rating categories rather than authored generically, which — as discussed in Section V — corresponds to the highest keyword-match coverage of the three domains. We evaluate four strategies for turning this per-aspect representation into a feature usable by the fusion stage, holding the fusion mechanism itself (NMF + DecisionTreeRegressor, Section III-B) fixed across all four:
 
-1. **Mean.** The per-aspect scores for a review are averaged into a single scalar, which replaces the global sentiment score at every point the baseline uses it — including the sentiment-aggregation feature inside the content-based clustering stream.
-2. **Confidence-weighted mean.** As above, but the average across matched aspects is weighted by each aspect's confidence rather than taken unweighted, testing whether confidence-aware aggregation recovers the information a naive mean discards.
-3. **Concat.** The per-aspect score vector is passed to the fusion stage without aggregation — one numeric feature per aspect (4, 5, or 6 raw features depending on domain, replacing the single global-sentiment feature) — while the content-based stream continues to use the mean of the aspect scores as its single sentiment-aggregation feature, since that stream's feature space is not designed to accept a variable-length vector.
-4. **Concat + confidence.** As Concat, but each aspect's confidence value is appended as an additional explicit feature (doubling the raw feature count to 8, 10, or 12 depending on domain), rather than being used to compute a weighted aggregate. This is the only variant in which confidence acts as a signal to the downstream regressor rather than as an aggregation weight.
+1. **Mean.** The per-aspect scores for a review are averaged into a single scalar over only the matched aspects (not the full aspect set), which replaces the global sentiment score at every point the baseline uses it — including the sentiment-aggregation feature inside the content-based clustering stream:
+
+$$s_{\text{mean}}(r) = \begin{cases} \dfrac{1}{|A(r)|} \displaystyle\sum_{a \in A(r)} \hat{s}(a,r) & A(r) \neq \emptyset \\[6pt] s_0(r) & A(r) = \emptyset \end{cases} \tag{2}$$
+
+2. **Confidence-weighted mean.** As above, but the average across matched aspects is weighted by each aspect's confidence $c(a,r)$ (Eq. 1) rather than taken unweighted, testing whether confidence-aware aggregation recovers the information a naive mean discards:
+
+$$s_{\text{conf}}(r) = \begin{cases} \dfrac{\sum_{a \in A(r)} c(a,r)\, \hat{s}(a,r)}{\sum_{a \in A(r)} c(a,r)} & A(r) \neq \emptyset \\[6pt] s_0(r) & A(r) = \emptyset \end{cases} \tag{3}$$
+
+3. **Concat.** Unlike Eq. 2–3, this variant preserves a value for every aspect in the domain's fixed set $\mathcal{A}$ (not only the matched ones), substituting the whole-review fallback for any aspect not individually matched, and passes the resulting fixed-width vector to the fusion stage without aggregation:
+
+$$\tilde{s}(a,r) = \begin{cases} \hat{s}(a,r) & a \in A(r) \\ s_0(r) & a \notin A(r) \end{cases}, \qquad \mathbf{v}_{\text{concat}}(r) = \big[\tilde{s}(a_1,r), \ldots, \tilde{s}(a_K,r)\big] \in [0,1]^{K} \tag{4}$$
+
+This yields one numeric feature per aspect (4, 5, or 6 raw features depending on domain, replacing the single global-sentiment feature), while the content-based stream continues to use $s_{\text{mean}}(r)$ (Eq. 2) as its single sentiment-aggregation feature, since that stream's feature space is not designed to accept a variable-length vector.
+
+4. **Concat + confidence.** As Concat, but each aspect's confidence (Eq. 1, with $n(a,r)=0$ substituted for $a \notin A(r)$, denoted $\tilde{c}(a,r)$) is appended as an additional explicit feature — doubling the raw feature count to 8, 10, or 12 depending on domain — rather than being used to compute a weighted aggregate as in Eq. 3:
+
+$$\mathbf{v}_{\text{concat+conf}}(r) = \big[\tilde{s}(a_1,r), \ldots, \tilde{s}(a_K,r),\ \tilde{c}(a_1,r), \ldots, \tilde{c}(a_K,r)\big] \in [0,1]^{2K} \tag{5}$$
+
+This is the only variant in which confidence acts as a signal to the downstream regressor rather than as an aggregation weight.
 
 All four variants reuse the fine-tuned BERT checkpoint and the train/validation/test split produced for the baseline run on the same domain and seed; only the DeepMF, content-based clustering (its sentiment-aggregation input specifically), and fusion stages are retrained, since these are the stages whose input changes.
 
@@ -246,5 +269,7 @@ This validated representation, A2-IRM, is the direct empirical input to the next
 [21] T. Widiyaningtyas, A. P. Wibawa, U. Pujianto, and W. Caesarendra, "MF-NCG: Recommendation Algorithm Using Matrix Factorization-based Normalized Cumulative Genre," *IJIES*, vol. 17, no. 2, pp. 180–189, Apr. 2024, doi: 10.22266/ijies2024.0430.16.
 
 [22] I. F. Rozi, R. Arianto, D. R. Yunianto, A. Y. Ananta, S. Rahmawati, and Krismawati, "Enhancing Aspect-Based Sentiment Analysis for Radio Station Public Opinion: Evaluating Preprocessing Strategies and Imbalanced Data Handling," in *2024 International Conference on Electrical and Information Technology (IEIT)*, Malang, Indonesia: IEEE, Sep. 2024, pp. 103–108, doi: 10.1109/IEIT64341.2024.10763129.
+
+[23] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, "BERT: Pre-training of deep bidirectional transformers for language understanding," in *Proc. 2019 Conf. North American Chapter Assoc. Comput. Linguistics: Human Language Technologies (NAACL-HLT)*, Minneapolis, MN, USA, Jun. 2019, pp. 4171–4186, doi: 10.18653/v1/N19-1423.
 
 *[References [7], [12], [13], [15]–[17] have incomplete author/title metadata in the source proposal document and must be verified against the original papers before submission — flagged rather than fabricated. Note also that [18]–[22] are now cited earlier in the text (Introduction) than [7]–[17] (Related Work) — strict IEEE numbering requires reference numbers to follow first-citation order, so a final renumbering pass (e.g., via a reference manager) is needed before submission; nothing about the reference CONTENT is affected, only the numbering.]*
