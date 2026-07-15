@@ -28,6 +28,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import datetime
 import logging
 from pathlib import Path
 
@@ -42,6 +43,50 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def _update_coverage_summary(
+    config: dict, domain: str, coverage: dict, checkpoint: str
+) -> None:
+    """Simpan/perbarui 1 baris ringkasan cakupan aspek PyABSA per domain ke
+    file bersama -- SEBELUM ini, angka cakupan cuma muncul di log Colab yang
+    sifatnya sementara (hilang begitu sesi ditutup), padahal angka ini
+    kemungkinan besar akan dikutip di manuskrip A2-FusionRS (setara Table II
+    di paper A2-IRM, tapi utk cakupan model-based bukan keyword-matching).
+
+    Path SAMA dengan direktori `results/` bersama yang sudah dipakai
+    run_baseline.py/run_baseline_absa.py (Path(checkpoint_dir).parent /
+    "results") -- supaya semua ringkasan hasil ada di 1 tempat yang sama,
+    bukan folder baru terpisah.
+
+    HANYA dipanggil utk run PENUH (bukan mode --sample-size verifikasi) --
+    baris existing utk domain yang sama DITIMPA (bukan ditambah duplikat)
+    supaya re-run domain yang sama tidak menghasilkan baris ganda.
+    """
+    results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = results_dir / "pyabsa_coverage_summary.csv"
+
+    new_row = {
+        "domain": domain,
+        "checkpoint": checkpoint,
+        "n_reviews": coverage["n_reviews"],
+        "n_with_any_aspect": coverage["n_with_any_aspect"],
+        "pct_with_any_aspect": round(coverage["pct_with_any_aspect"] * 100, 2),
+        "avg_aspects_per_review": round(coverage["avg_aspects_per_review"], 2),
+        "computed_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+
+    if summary_path.exists():
+        existing = pd.read_csv(summary_path)
+        existing = existing[existing["domain"] != domain]
+        updated = pd.concat([existing, pd.DataFrame([new_row])], ignore_index=True)
+    else:
+        updated = pd.DataFrame([new_row])
+
+    updated = updated.sort_values("domain").reset_index(drop=True)
+    updated.to_csv(summary_path, index=False)
+    logger.info("Ringkasan cakupan PyABSA (%s) diperbarui di %s.", domain, summary_path)
 
 
 def run_scoring(config: dict, sample_size: int | None, random_state: int, checkpoint: str) -> None:
@@ -104,6 +149,12 @@ def run_scoring(config: dict, sample_size: int | None, random_state: int, checkp
 
     scored_df.to_csv(cache_path, index=False)
     logger.info("Skor PyABSA disimpan ke cache %s.", cache_path)
+
+    if sample_size is None:
+        # Ringkasan cakupan HANYA disimpan utk run penuh -- angka dari mode
+        # verifikasi --sample-size bukan angka kanonis domain ini, cuma
+        # utk sanity check sebelum commit ke run penuh.
+        _update_coverage_summary(config, domain, coverage, checkpoint)
 
 
 if __name__ == "__main__":
