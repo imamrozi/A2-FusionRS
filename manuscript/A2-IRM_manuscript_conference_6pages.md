@@ -89,7 +89,7 @@ $$s_{\text{conf}}(r) = \begin{cases} \dfrac{\sum_{a \in A(r)} c(a,r)\, \hat{s}(a
 
 $$\tilde{s}(a,r) = \begin{cases} \hat{s}(a,r) & a \in A(r) \\ s_0(r) & a \notin A(r) \end{cases}, \qquad \mathbf{v}_{\text{concat}}(r) = [\tilde{s}(a_1,r), \ldots, \tilde{s}(a_K,r)] \in [0,1]^{K} \tag{4}$$
 
-This yields one feature per aspect (4–6 depending on domain). The content-based stream instead receives $\bar{s}(r) = \frac{1}{K}\sum_{a \in \mathcal{A}} \tilde{s}(a,r)$ — the mean over the *entire* concat vector, which coincides with $s_{\text{mean}}(r)$ only when $A(r) = \mathcal{A}$ or $A(r) = \emptyset$; this does not affect Table III, which uses $\mathbf{v}_{\text{concat}}(r)$ directly as fusion input.
+This yields one feature per aspect (4–6 depending on domain). The content-based stream instead receives $\bar{s}(r) = \frac{1}{K}\sum_{a \in \mathcal{A}} \tilde{s}(a,r)$ — the mean over the *entire* concat vector, which coincides with $s_{\text{mean}}(r)$ only when $A(r) = \mathcal{A}$ or $A(r) = \emptyset$. This does not affect the sentiment feature fed to fusion, which uses $\mathbf{v}_{\text{concat}}(r)$ directly (Section III-B); it does still reach Table III indirectly, since $\bar{s}(r)$ feeds the content-based stream's own per-item sentiment feature and thus its rating prediction, one of the three signals the fusion regressor combines.
 
 4. **Concat + confidence.** As Concat, with each aspect's confidence appended as an additional feature (doubling the feature count to 8–12) rather than used as an aggregation weight:
 
