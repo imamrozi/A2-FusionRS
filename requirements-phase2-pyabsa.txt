@@ -1,0 +1,52 @@
+# requirements-phase2-pyabsa.txt
+# Overlay TAMBAHAN (bukan pengganti) requirements.txt / requirements-colab.txt --
+# hanya dibutuhkan untuk src/a2fusionrs/pyabsa_scorer.py & run_pyabsa_scoring.py
+# (Fase 2, ABSA berbasis model PyABSA), TIDAK dibutuhkan untuk menjalankan
+# pipeline Fase 1 (A2-IRM) sama sekali.
+#
+# Dipisah dari requirements.txt/requirements-colab.txt SENGAJA -- pin versi di
+# sini (terutama transformers) LEBIH KETAT dari pin di requirements.txt biasa
+# (transformers>=4.38.0,<5.0.0) karena checkpoint pretrained PyABSA "english"
+# di-pickle dengan struktur modul internal transformers versi lama. Instalasi
+# ulang requirements.txt setelah file ini BISA menimpa pin ketat ini -- kalau
+# perlu keduanya di environment yang sama, instal file ini TERAKHIR.
+#
+# Urutan & pin di bawah adalah hasil troubleshooting nyata (6 isu terdokumentasi
+# di phase2_notes/pyabsa_investigation.md Bagian 2) -- JANGAN diubah tanpa
+# menguji ulang di Colab GPU, terutama urutan instalasi update-checker SETELAH
+# pyabsa (issue #1 di catatan investigasi).
+#
+# Instalasi (urutan PENTING):
+#   pip install "spacy<3.8"
+#   pip install findfile==2.0.1
+#   pip install pyabsa
+#   pip install update-checker==0.18.0
+#   pip install "transformers==4.57.6"
+#   pip install protobuf sentencepiece
+#   python -m spacy download en_core_web_sm
+
+spacy<3.8
+findfile==2.0.1
+pyabsa
+update-checker==0.18.0
+transformers==4.57.6
+protobuf
+sentencepiece
+
+# ============================================================
+# SETELAH INSTALASI (Colab): WAJIB restart runtime/session (Runtime > Restart
+# session) sebelum import pyabsa -- lihat issue #4 di pyabsa_investigation.md.
+#
+# WAJIB set HF_HOME ke path Google Drive SEBELUM memuat checkpoint apa pun,
+# supaya backbone model (mis. microsoft/mdeberta-v3-base, ~1,33GB) ter-cache
+# permanen lintas sesi -- lihat issue #5 di pyabsa_investigation.md:
+#
+#   import os
+#   os.environ["HF_HOME"] = "/content/drive/MyDrive/<path>/hf_cache"
+#
+# Checkpoint pretrained "english" HARUS diunduh dari mesin LOKAL (bukan
+# Colab) lalu diupload manual ke Drive -- lihat issue #3 (bug infrastruktur
+# Xet storage HuggingFace, traffic dari Colab/GCP diarahkan ke CDN edge
+# rusak). Detail lengkap & link: phase2_notes/pyabsa_investigation.md
+# Lampiran B.
+# ============================================================

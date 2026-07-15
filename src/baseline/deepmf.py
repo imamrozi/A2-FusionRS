@@ -278,6 +278,81 @@ class DeepMFTrainer:
         self.model.train()
         return preds
 
+    @torch.no_grad()
+    def predict_with_latent(
+        self,
+        df: pd.DataFrame,
+        user2idx: dict,
+        item2idx: dict,
+        rating_scale: tuple[float, float] = (1.0, 5.0),
+        unseen_fallback: str = "global_mean",
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sama persis dengan predict(), TAPI juga mengembalikan representasi
+        laten (hidden layer terakhir deep_layers, SEBELUM output_layer) per
+        baris -- dibutuhkan Attention-Gated Fusion (Fase 2) sebagai salah
+        satu token input attention, menggantikan skalar prediksi akhir yang
+        dipakai fusi statis NMF+DecisionTree (Fase 1).
+
+        Method INDEPENDEN dari predict() (duplikasi logika unseen-fallback/
+        batching disengaja, bukan reuse via refactor) -- predict() yang
+        sudah dipakai run_baseline.py/run_baseline_absa.py TIDAK berubah
+        perilaku sama sekali.
+
+        Baris cold-start (user/item unknown) diisi vektor laten NOL --
+        tidak ada representasi laten yang bermakna untuk user/item yang
+        tidak pernah dilihat model saat training.
+        """
+        self.model.eval()
+        rating_min, rating_max = rating_scale
+        scale_range = rating_max - rating_min
+        latent_dim = self.config.hidden_layers[-1]
+
+        user_idx = df["user_id"].map(user2idx)
+        item_idx = df["business_id"].map(item2idx)
+        unknown_mask = user_idx.isna() | item_idx.isna()
+
+        if unknown_mask.any():
+            n_unknown = int(unknown_mask.sum())
+            if unseen_fallback == "error":
+                raise KeyError(
+                    f"{n_unknown} baris memiliki user/item yang tidak dikenal "
+                    "model (kemungkinan cold-start) -- set unseen_fallback="
+                    "'global_mean' jika ingin fallback otomatis."
+                )
+            logger.warning(
+                "%d baris (dari %d) memiliki user/item unknown (cold-start), "
+                "prediksi diisi rating rata-rata skala, laten diisi vektor nol.",
+                n_unknown,
+                len(df),
+            )
+
+        preds = np.full(len(df), rating_min + scale_range / 2, dtype=np.float32)
+        latents = np.zeros((len(df), latent_dim), dtype=np.float32)
+        known_rows = ~unknown_mask.values
+
+        if known_rows.any():
+            u_tensor = torch.tensor(
+                user_idx[known_rows].astype(int).values, dtype=torch.long, device=self.config.device
+            )
+            i_tensor = torch.tensor(
+                item_idx[known_rows].astype(int).values, dtype=torch.long, device=self.config.device
+            )
+            batch_size = self.config.batch_size
+            known_preds = []
+            known_latents = []
+            for start in range(0, len(u_tensor), batch_size):
+                end = start + batch_size
+                p, lat = self.model(u_tensor[start:end], i_tensor[start:end], return_latent=True)
+                known_preds.append(p.cpu().numpy())
+                known_latents.append(lat.cpu().numpy())
+            known_preds = np.concatenate(known_preds)
+            known_latents = np.concatenate(known_latents)
+            preds[known_rows] = known_preds * scale_range + rating_min
+            latents[known_rows] = known_latents
+
+        self.model.train()
+        return preds, latents
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

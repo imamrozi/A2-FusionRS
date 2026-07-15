@@ -272,6 +272,12 @@ class CBFPredictor:
 
         labels = self.clusterer.fit(item_features)
         self.item_cluster_labels = dict(zip(item_df["business_id"], labels))
+        # Vektor fitur item MENTAH (pra-clustering, pasca-PCA) disimpan per
+        # item_id -- dipakai predict_features() (Attention-Gated Fusion,
+        # Fase 2). TIDAK dipakai predict()/logika clustering lama sama
+        # sekali, murni tambahan aditif.
+        self._item_feature_vectors: dict = dict(zip(item_df["business_id"], item_features))
+        self._item_feature_dim = item_features.shape[1]
 
         self.user_cluster_pref = self.clusterer.predict_user_cluster_preference(
             train_df, self.item_cluster_labels
@@ -281,6 +287,10 @@ class CBFPredictor:
         train_df_c["cluster"] = train_df_c["business_id"].map(self.item_cluster_labels)
         self.cluster_avg_rating = train_df_c.groupby("cluster")["stars"].mean().to_dict()
         self.global_mean_rating = float(train_df["stars"].mean())
+        # Dimensi vektor gabungan yg akan dikembalikan predict_features() --
+        # diekspos supaya pemanggil (mis. run_attention_gated_fusion.py) bisa
+        # tahu ukuran fitur CBF sebelum benar-benar memanggilnya.
+        self.feature_dim = self._item_feature_dim + self.clusterer.best_k
 
     def predict(self, df: pd.DataFrame, rating_scale: tuple[float, float] = (1.0, 5.0)) -> np.ndarray:
         if self.item_cluster_labels is None:
@@ -323,6 +333,46 @@ class CBFPredictor:
                 len(df),
             )
         return np.clip(preds, rating_min, rating_max)
+
+    def predict_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Kembalikan representasi VEKTOR (bukan skalar rating) per baris:
+        konkatenasi [vektor fitur item hasil PCA] + [vektor preferensi user
+        atas SEMUA cluster] -- dibutuhkan Attention-Gated Fusion (Fase 2)
+        sebagai salah satu token input attention, menggantikan skalar
+        rating akhir yang dipakai fusi statis NMF+DecisionTree (Fase 1).
+
+        Method INDEPENDEN dari predict() (tidak berbagi kode, TIDAK
+        mengubah fit()/clustering sama sekali) -- predict() lama tetap
+        dipakai apa adanya oleh run_baseline.py/run_baseline_absa.py.
+
+        Fallback cold-start: vektor item NOL kalau item tidak dikenal
+        sama sekali (di luar item_cluster_labels); entri preferensi user
+        NOL untuk cluster mana pun yang belum pernah diinteraksi user di
+        train (termasuk user baru -- seluruh vektor preferensinya NOL).
+        """
+        if self.item_cluster_labels is None:
+            raise RuntimeError("Panggil fit() terlebih dahulu sebelum predict_features().")
+
+        n_clusters = self.clusterer.best_k
+        item_vecs = np.zeros((len(df), self._item_feature_dim), dtype=np.float32)
+        user_vecs = np.zeros((len(df), n_clusters), dtype=np.float32)
+
+        pref_lookup = self.user_cluster_pref.set_index(["user_id", "cluster"])["preference"].to_dict()
+
+        for idx, row in enumerate(df.itertuples(index=False)):
+            item_id = getattr(row, "business_id")
+            user_id = getattr(row, "user_id")
+
+            item_vec = self._item_feature_vectors.get(item_id)
+            if item_vec is not None:
+                item_vecs[idx] = item_vec
+
+            for cluster in range(n_clusters):
+                pref = pref_lookup.get((user_id, cluster))
+                if pref is not None:
+                    user_vecs[idx, cluster] = pref
+
+        return np.concatenate([item_vecs, user_vecs], axis=1)
 
 
 if __name__ == "__main__":

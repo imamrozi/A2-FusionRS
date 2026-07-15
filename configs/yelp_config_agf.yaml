@@ -1,0 +1,24 @@
+# configs/yelp_config_agf.yaml
+# A2-FusionRS Fase 2: overlay Attention-Gated Fusion di atas config domain
+# restoran (Yelp) Fase 1 -- reuse SEMUA hyperparameter DeepMF/CBF/data/
+# split/SA apa adanya (lihat _base), cuma menambah blok `agf:` baru.
+# Skenario ablasi (full_agf/attention_only/gating_only/leave-one-out/dst)
+# dipilih via CLI --scenario di run_attention_gated_fusion.py, BUKAN file
+# config terpisah per skenario -- lihat "Hindari ledakan file config" di
+# phase2_notes/attention_gated_fusion_design.md & plan implementasi Fase 2.
+
+_base: yelp_config.yaml
+
+experiment:
+  name: "restaurant_agf"
+
+agf:
+  d: 64
+  n_heads: 2
+  epochs: 30
+  batch_size: 512
+  learning_rate: 0.001
+  # "pyabsa" (default, Fase 2) atau "keyword" -- di-override otomatis ke
+  # "keyword" utk skenario agf_keyword (lihat AGF_SCENARIOS di
+  # run_attention_gated_fusion.py), tidak perlu diubah manual di sini.
+  absa_source: "pyabsa"
