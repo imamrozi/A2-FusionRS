@@ -113,11 +113,15 @@ $$s_{\text{conf}}(r) = \begin{cases} \dfrac{\sum_{a \in A(r)} c(a,r)\, \hat{s}(a
 
 $$\tilde{s}(a,r) = \begin{cases} \hat{s}(a,r) & a \in A(r) \\ s_0(r) & a \notin A(r) \end{cases}, \qquad \mathbf{v}_{\text{concat}}(r) = \big[\tilde{s}(a_1,r), \ldots, \tilde{s}(a_K,r)\big] \in [0,1]^{K} \tag{4}$$
 
-This yields one numeric feature per aspect (4, 5, or 6 raw features depending on domain, replacing the single global-sentiment feature), while the content-based stream continues to use $s_{\text{mean}}(r)$ (Eq. 2) as its single sentiment-aggregation feature, since that stream's feature space is not designed to accept a variable-length vector.
+This yields one numeric feature per aspect (4, 5, or 6 raw features depending on domain, replacing the single global-sentiment feature). The content-based stream, whose feature space is not designed to accept a variable-length vector, instead receives a single derived scalar — the unweighted mean over the *entire* $K$-dimensional vector $\mathbf{v}_{\text{concat}}(r)$ (Eq. 4), i.e. $\bar{s}(r) = \frac{1}{K}\sum_{a \in \mathcal{A}} \tilde{s}(a,r)$, rather than $s_{\text{mean}}(r)$ (Eq. 2). The two coincide only when $A(r) = \mathcal{A}$ (every aspect matched) or $A(r) = \emptyset$ (none matched); for partial matches, $\bar{s}(r)$ is pulled toward the fallback score $s_0(r)$ by the unmatched-aspect slots it averages in, whereas $s_{\text{mean}}(r)$ averages over matched aspects only. This does not affect the RMSE results in Table III, which use the raw vector $\mathbf{v}_{\text{concat}}(r)$ directly as fusion input (Section III-B) rather than this derived scalar; it affects only this secondary content-based-stream feature, computed identically for the Concat + confidence variant below.
 
-4. **Concat + confidence.** As Concat, but each aspect's confidence (Eq. 1, with $n(a,r)=0$ substituted for $a \notin A(r)$, denoted $\tilde{c}(a,r)$) is appended as an additional explicit feature — doubling the raw feature count to 8, 10, or 12 depending on domain — rather than being used to compute a weighted aggregate as in Eq. 3:
+4. **Concat + confidence.** As Concat, but each aspect's confidence is appended as an additional explicit feature — doubling the raw feature count to 8, 10, or 12 depending on domain — rather than being used to compute a weighted aggregate as in Eq. 3. The confidence feature reuses the margin-and-evidence terms of Eq. 1, with $n(a,r) = 0$ substituted for $a \notin A(r)$ (so the filled score $\tilde{s}(a,r)$, not $\hat{s}(a,r)$, enters the margin term for unmatched aspects):
 
-$$\mathbf{v}_{\text{concat+conf}}(r) = \big[\tilde{s}(a_1,r), \ldots, \tilde{s}(a_K,r),\ \tilde{c}(a_1,r), \ldots, \tilde{c}(a_K,r)\big] \in [0,1]^{2K} \tag{5}$$
+$$\tilde{c}(a,r) = \frac{|2\tilde{s}(a,r) - 1| + \min(n(a,r)/3,\ 1)}{2} \tag{5}$$
+
+Unlike Eq. 1, $\tilde{c}(a,r)$ is **not** floored at 0.05 in the implementation that produced the results reported below — the floor is applied only in the confidence-weighted-mean aggregation (Eq. 3). Its omission here reflects an inconsistency between the two ABSA-fusion code paths rather than a deliberate design choice; we report it for transparency rather than silently re-deriving Table III under a corrected formula:
+
+$$\mathbf{v}_{\text{concat+conf}}(r) = \big[\tilde{s}(a_1,r), \ldots, \tilde{s}(a_K,r),\ \tilde{c}(a_1,r), \ldots, \tilde{c}(a_K,r)\big] \in [0,1]^{2K} \tag{6}$$
 
 This is the only variant in which confidence acts as a signal to the downstream regressor rather than as an aggregation weight.
 
