@@ -174,3 +174,39 @@ kalau ingin sesi lebih panjang sekali jalan.
 - Representasi CBF final: perlu diputuskan apakah PCA item vector + user
   cluster preference vector digabung (concat) sebelum proyeksi linear, atau
   diproyeksikan terpisah lalu dijumlah -- pilih setelah lihat performa awal.
+
+## 6. Rencana perbaikan (setelah Stage 7): representasi PyABSA per-aspek via attention
+
+**Masalah yang teridentifikasi** (diskusi pasca-150-run, sebelum Stage 7):
+`vectorize_absa_features()` (`src/a2fusionrs/pyabsa_scorer.py`) meringkas
+output PyABSA yang SEBENARNYA per-aspek (jumlah aspek variabel, nama aspek
+open-vocabulary) menjadi vektor 5-dim via RATA-RATA lintas aspek
+(`mean_positive_prob`, `mean_negative_prob`, `mean_confidence`). Ini secara
+konseptual OPERASI YANG SAMA dengan varian "Mean" A2-IRM Fase 1 yang
+terbukti empiris merusak sinyal ("averaging destroys exactly the polarity
+contrast", Section V manuskrip A2-IRM) -- `std_positive_prob` cuma mitigasi
+parsial (tahu "ada variasi", tidak tahu aspek mana yang bermasalah).
+
+**Alasan desain saat ini** (bukan kelalaian, tapi keterbatasan format
+tetap): Concat+Confidence Fase 1 bisa jadi vektor fixed-size karena K
+(jumlah aspek) TETAP per domain (taksonomi keyword). PyABSA open-vocabulary
+-- jumlah & nama aspek beda tiap review -- tidak punya "slot kolom tetap"
+utk di-concat langsung dengan cara yang sama.
+
+**Rencana perbaikan**: ganti agregasi rata-rata dengan sub-layer ATTENTION
+yang memproses sequence per-aspek PyABSA (panjang variabel: skor+confidence
+tiap aspek yang ditemukan) SEBELUM masuk ke token modalitas 'absa' utama --
+bobot gabungan antar aspek DIPELAJARI (bukan rata-rata polos), lebih
+konsisten dgn filosofi "Attention-Gated" arsitektur ini, dan berpotensi
+menghindari jebakan averaging yang sudah terbukti di Fase 1.
+
+**Urutan kerja yang disepakati**: JANGAN redesign dulu sebelum ada bukti
+empiris. Selesaikan Stage 7 (analisis 150 run yang sudah ada) dulu --
+terutama bandingkan skenario `agf_keyword` (arsitektur AGF + representasi
+ABSA Concat+Confidence Fase 1 yang terbukti terbaik) vs `full_agf`/skenario
+PyABSA lain (arsitektur AGF sama + representasi rata-rata 5-dim baru). Kalau
+`agf_keyword` secara konsisten mengungguli skenario PyABSA lintas
+domain/seed -- itu bukti kuat averaging memang merugikan di sini juga, dan
+investasi redesign+re-run (~5,5 jam GPU tambahan) sepadan. Kalau selisihnya
+kecil/tidak konsisten, redesign bisa ditunda jadi catatan future work di
+manuskrip alih-alih dikerjakan sekarang.
