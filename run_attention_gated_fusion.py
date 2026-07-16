@@ -48,6 +48,7 @@ import numpy as np
 import pandas as pd
 import torch
 from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 
 from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
@@ -259,7 +260,30 @@ def _compute_absa_features(
     raise ValueError(f"absa_source '{absa_source}' tidak dikenal -- pakai 'keyword' atau 'pyabsa'.")
 
 
-def run_pipeline(config: dict, scenario: str) -> None:
+def run_pipeline(
+    config: dict,
+    scenario: str,
+    input_standardize: bool = False,
+    use_scalar_preds: bool = False,
+    run_tag: str = "",
+) -> None:
+    """`input_standardize` & `use_scalar_preds` adalah 2 DIAGNOSTIK Stage 7
+    (default False = perilaku ASLI 150-run, byte-identical). Keduanya HANYA
+    berlaku untuk skenario AGF (bukan static_pyabsa/weighted_avg):
+
+    - input_standardize: StandardScaler per-modalitas (fit di train, apply ke
+      semua split) SEBELUM masuk AGF. Alasan: laten DeepMF (pasca-ReLU),
+      fitur CBF (PCA, bisa +-besar), dan ABSA ([0,1]) ada di SKALA sangat
+      berbeda tanpa normalisasi -- diduga penyebab 1 modalitas "tenggelam"
+      (leave_out_deepmf ~= full_agf) & anomali gate lintas domain.
+    - use_scalar_preds: umpankan prediksi rating skalar DeepMF/CBF (yg SUDAH
+      terkalibrasi, dipakai A2-IRM & static_pyabsa) sbg fitur tambahan di
+      modalitas masing-masing -- AGF versi asli MEMBUANG ini, cuma pakai
+      laten/fitur mentah.
+
+    `run_tag`: suffix ke nama file hasil supaya run diagnostik TIDAK menimpa
+    hasil utama 150-run (mis. run_tag='norm' -> agf_full_agf_norm_...yaml).
+    """
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
 
@@ -410,6 +434,36 @@ def run_pipeline(config: dict, scenario: str) -> None:
         modalities = scenario_cfg["modalities"]
 
         all_feature_sources = {"deepmf": deepmf_latent, "cbf": cbf_features, "absa": absa_features}
+
+        # DIAGNOSTIK 1 (use_scalar_preds): tambahkan prediksi rating skalar
+        # DeepMF/CBF (yg SUDAH terkalibrasi) sbg 1 kolom fitur ekstra di
+        # modalitas masing-masing. AGF versi asli cuma pakai laten/fitur
+        # mentah -- diuji apakah mengembalikan sinyal prediksi yg dibuang.
+        if use_scalar_preds:
+            scalar_sources = {"deepmf": deepmf_scalar, "cbf": cbf_scalar}
+            for mod, scalar_dict in scalar_sources.items():
+                if mod in all_feature_sources:
+                    all_feature_sources[mod] = {
+                        split: np.hstack([all_feature_sources[mod][split], scalar_dict[split].reshape(-1, 1)])
+                        for split in ("train", "val", "test")
+                    }
+            logger.info("DIAGNOSTIK use_scalar_preds AKTIF: prediksi skalar DeepMF/CBF ditambah sbg fitur.")
+
+        # DIAGNOSTIK 2 (input_standardize): StandardScaler per-modalitas, fit
+        # HANYA di train, apply ke semua split -- menyamakan skala antar-
+        # modalitas yg sangat berbeda (laten DeepMF vs PCA CBF vs ABSA [0,1]).
+        if input_standardize:
+            for mod in list(all_feature_sources.keys()):
+                if mod not in modalities:
+                    continue
+                scaler = StandardScaler()
+                scaler.fit(all_feature_sources[mod]["train"])
+                all_feature_sources[mod] = {
+                    split: scaler.transform(all_feature_sources[mod][split]).astype(np.float32)
+                    for split in ("train", "val", "test")
+                }
+            logger.info("DIAGNOSTIK input_standardize AKTIF: StandardScaler per-modalitas (fit di train).")
+
         modality_dims = {m: all_feature_sources[m]["train"].shape[1] for m in modalities}
 
         def build_features(split_name: str) -> dict[str, np.ndarray]:
@@ -464,8 +518,11 @@ def run_pipeline(config: dict, scenario: str) -> None:
 
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_prefix = f"agf_{scenario}"
-    model_name = f"a2fusionrs_agf_{scenario}"
+    # run_tag disisipkan ke prefix supaya run diagnostik TIDAK menimpa hasil
+    # utama 150-run (agf_{scenario}_{domain}_seed{seed}.yaml).
+    tag_suffix = f"_{run_tag}" if run_tag else ""
+    results_prefix = f"agf_{scenario}{tag_suffix}"
+    model_name = f"a2fusionrs_agf_{scenario}{tag_suffix}"
     results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
@@ -485,7 +542,11 @@ def run_pipeline(config: dict, scenario: str) -> None:
         "train_time_seconds": train_time,
         "predict_time_seconds": predict_time,
         "n_parameters": n_params,
-        "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}'.",
+        "input_standardize": input_standardize,
+        "use_scalar_preds": use_scalar_preds,
+        "run_tag": run_tag,
+        "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}'"
+        + (f" [DIAGNOSTIK: {run_tag}]" if run_tag else "."),
     }
     save_results_yaml(results_path, results_summary, config=config)
 
@@ -512,9 +573,26 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seed", type=int, default=None, help="Override experiment.seed dari config -- utk protokol multi-seed."
     )
+    parser.add_argument(
+        "--input-standardize", action="store_true",
+        help="DIAGNOSTIK Stage 7: StandardScaler per-modalitas sebelum AGF (default off = perilaku 150-run asli).",
+    )
+    parser.add_argument(
+        "--use-scalar-preds", action="store_true",
+        help="DIAGNOSTIK Stage 7: umpankan prediksi skalar DeepMF/CBF sbg fitur tambahan (default off).",
+    )
+    parser.add_argument(
+        "--run-tag", type=str, default="",
+        help="Suffix nama file hasil supaya run diagnostik tidak menimpa hasil utama 150-run (mis. 'norm').",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     if args.seed is not None:
         cfg["experiment"]["seed"] = args.seed
-    run_pipeline(cfg, args.scenario)
+    run_pipeline(
+        cfg, args.scenario,
+        input_standardize=args.input_standardize,
+        use_scalar_preds=args.use_scalar_preds,
+        run_tag=args.run_tag,
+    )
