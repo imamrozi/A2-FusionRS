@@ -1,0 +1,93 @@
+# A2-FusionRS — Results Ledger (sumber kebenaran angka manuskrip)
+
+> Semua angka di bawah SUDAH terverifikasi dari run multi-seed (5 seed: 42, 123,
+> 456, 789, 1011) di Colab, tersimpan di `checkpoints/results/` pada Google Drive.
+> **JANGAN menulis angka di manuskrip yang tidak ada di berkas ini.** Setiap angka
+> punya prefix file sumbernya untuk audit.
+>
+> Protokol: split user-based identik untuk SEMUA model; test set Amazon=16.580,
+> Restaurant=13.233, Hotel=11.795 sampel. Metrik utama RMSE (skala rating 1–5,
+> lebih kecil lebih baik). Signifikansi: Wilcoxon signed-rank berpasangan per
+> seed atas squared-error per-sampel.
+
+## 1. Karakteristik domain (cakupan ABSA)
+
+| Domain | Cakupan keyword-ABSA | Cakupan PyABSA | Rata-rata aspek/review (PyABSA) | Sparsity |
+|---|---:|---:|---:|---:|
+| Amazon Electronics | 45,1% | 80,4% | 1,81 | 99,91% |
+| Restaurant (Yelp) | 87,7% | (dari coverage summary) | (dari coverage summary) | 5-core |
+| TripAdvisor Hotel | 95,9% | 70,2% | 2,77 | — |
+
+> CATATAN: cakupan keyword-ABSA vs PyABSA adalah metrik BERBEDA (keyword =
+> taksonomi tetap; PyABSA = open-vocabulary). Angka Restaurant PyABSA perlu
+> dikutip dari `pyabsa_coverage_summary` di Drive sebelum final.
+
+## 2. Tabel utama — RMSE mean±SD (5 seed)
+
+Prefix file: `<prefix>_<domain>_seed<seed>.yaml`
+
+| Model | Prefix file | Amazon | Restaurant | Hotel |
+|---|---|---:|---:|---:|
+| Item-KNN | `classical_cf_item_knn` | 1,2240±,000 | 1,2019±,000 | 0,9163±,000 |
+| SVD | `classical_cf_svd` | 1,1420±,001 | 1,0753±,001 | 0,8953±,000 |
+| NeuMF | `neural_cf_neumf` | 1,1528±,001 | 1,0740±,001 | 0,8399±,001 |
+| DeepFM | `neural_cf_deepfm` | 1,1529±,002 | 1,0746±,002 | 0,8393±,001 |
+| A2-IRM (concat+conf) | `absa_ablation_concat_confidence` | 0,6517±,003 | 0,6791±,001 | 0,6291±,003 |
+| **A2-FusionRS** | `agf_agf_keyword_oof_perseq` | **0,6418±,002** | **0,6665±,001** | **0,6196±,003** |
+| Global Mean Predictor | (referensi) | _TBD_ | _TBD_ | _TBD_ |
+
+> Global Mean Predictor: jalankan cell sanity (train mean → test RMSE). Diharapkan
+> ~1,1–1,2 → menunjukkan CF murni ≈ prediksi rata-rata pada sparsity ekstrem.
+
+## 3. Ablasi komponen A2-FusionRS — RMSE mean±SD (5 seed)
+
+| Varian | Prefix file | Amazon | Restaurant | Hotel |
+|---|---|---:|---:|---:|
+| AGF tanpa PyABSA (plafon) | `agf_agf_keyword_oof` | 0,6520±,002 | 0,6773±,001 | 0,6286±,003 |
+| tree(NMF+DT) + PyABSA | `agf_static_keyword_pyabsa_ctrl` | 0,6384±,001 | 0,6676±,001 | 0,6201±,003 |
+| AGF + PyABSA order-stats | `agf_agf_keyword_oof_pyrich` | 0,6407±,002 | 0,6674±,001 | 0,6216±,003 |
+| AGF + PyABSA identitas aspek (final) | `agf_agf_keyword_oof_perseq` | 0,6418±,002 | 0,6665±,001 | 0,6196±,003 |
+
+## 4. Uji signifikansi (Wilcoxon, ringkasan n-seed signifikan)
+
+| Perbandingan | Amazon | Restaurant | Hotel | Interpretasi |
+|---|---|---|---|---|
+| A2-FusionRS vs A2-IRM | 5/5 (p 10⁻¹¹²…10⁻¹⁹⁸) | 5/5 | 5/5 | HEADLINE menang telak |
+| A2-FusionRS vs NeuMF | 5/5 (p≈0) | 5/5 | 5/5 | menang atas SOTA neural CF |
+| A2-FusionRS vs DeepFM | 5/5 | 5/5 | 5/5 | idem |
+| A2-FusionRS vs SVD | 5/5 | 5/5 | 5/5 | idem |
+| A2-FusionRS vs Item-KNN | 5/5 | 5/5 | 5/5 | idem |
+| tree+PyABSA vs A2-IRM | 5/5 | 5/5 | 5/5 | PyABSA menembus plafon |
+| AGF-tanpa-PyABSA vs A2-IRM | seri* | seri (1/5) | seri* | arsitektur sendiri = plafon |
+| **AGF vs tree (atribusi)** | tree menang | AGF 4/5 | seri (2/5) | AGF TIDAK unggul robust atas tree |
+
+> \* "5/5 signifikan" utk AGF-noPy vs A2-IRM adalah artefak Wilcoxon N-besar
+> (12–16k pasang mendeteksi geser distribusi mikro walau RMSE praktis seri).
+> WAJIB lapor Δ-RMSE bersama p-value; JANGAN klaim peningkatan dari p saja.
+
+## 5. Temuan mekanistik (untuk Discussion)
+
+1. **Manfaat PyABSA ∝ 1/cakupan-keyword**: tree+PyABSA vs A2-IRM turun −0,0143
+   (Amazon 45%), −0,0115 (Restaurant 88%), −0,0090 (Hotel 96%). PyABSA menambal
+   paling banyak di domain yang keyword-ABSA-nya paling lemah.
+2. **Keunggulan AGF atas tree TIDAK robust** (multi-seed): Amazon tree menang
+   (+0,0034), Restaurant AGF marginal (−0,0011, 4/5), Hotel seri (−0,0005, 2/5).
+   Tren monotonik single-seed tidak bertahan. → AGF diposisikan sebagai fusi
+   INTERPRETABLE yang MENYAMAI fusi statis, BUKAN unggul akurasi.
+3. **Pure-CF konvergen ~1,1–1,2** (KNN/SVD/NeuMF/DeepFM) = plafon CF sejati pada
+   review ultra-sparse; sinyal review (konten+sentimen) yang membawa ke ~0,65.
+
+## 6. Klaim yang BOLEH & TIDAK BOLEH ditulis
+
+BOLEH (didukung data):
+- A2-FusionRS mengungguli A2-IRM & 4 baseline eksternal, signifikan, 3 domain × 5 seed.
+- Peningkatan bersumber dari ABSA berbasis model per-aspek (PyABSA) sebagai modalitas komplementer (atribusi via ablasi + kontrol tree+PyABSA).
+- Manfaat PyABSA terbesar pada domain cakupan-keyword terlemah.
+
+TIDAK BOLEH (overclaim):
+- "Attention-gated fusion mengungguli fusi statis pada akurasi" (kontrol tree+PyABSA menyamainya).
+- Menyimpulkan keunggulan dari p-value saat RMSE seri (artefak N-besar).
+- Generalisasi di luar 3 domain / bahasa Inggris / 1 checkpoint PyABSA.
+
+---
+_Terakhir diperbarui: setelah run baseline eksternal multi-seed (commit 76fcb0c)._
