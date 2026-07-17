@@ -54,6 +54,8 @@ from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
 from src.a2fusionrs.pyabsa_scorer import (
     ABSA_VECTOR_FEATURE_NAMES,
+    build_aspect_sequences,
+    build_aspect_vocab,
     load_cached_scores,
     vectorize_absa_features,
     vectorize_absa_features_rich,
@@ -313,6 +315,51 @@ def _compute_pyabsa_rich_modality(
     return out
 
 
+def _compute_pyabsa_aspect_sequences(
+    config: dict, exp_cfg: dict, splits: dict, max_aspects: int = 8, vocab_top_k: int = 500
+) -> tuple[dict, dict]:
+    """Jalur X: sequence aspek PyABSA panjang-variabel + vocab identitas aspek,
+    utk AspectSequencePooling di AGF. Vocab dibangun HANYA dari TRAIN (cegah
+    leakage istilah aspek dari test). Return (vocab, {split: {ids,feats,mask}}).
+    """
+    pyabsa_cache_dir = Path(config["logging"]["checkpoint_dir"]) / "pyabsa"
+    cache_path = pyabsa_cache_dir / f"pyabsa_scores_{exp_cfg['domain']}.csv"
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"Cache skor PyABSA tidak ditemukan di {cache_path} -- jalankan run_pyabsa_scoring.py dulu."
+        )
+    pyabsa_df = load_cached_scores(str(cache_path)).set_index("review_id")
+    fb_path = pyabsa_cache_dir / f"sa_fallback_scores_{exp_cfg['domain']}.csv"
+    fb_cache = (
+        pd.read_csv(fb_path).set_index("review_id")["fallback_score"].to_dict() if fb_path.exists() else {}
+    )
+
+    def merged_for(part_df):
+        m = part_df[["review_id"]].merge(
+            pyabsa_df[["n_aspects", "aspects", "sentiments", "confidences", "probs"]],
+            left_on="review_id", right_index=True, how="left",
+        )
+        miss = m["n_aspects"].isna()
+        if miss.any():
+            m.loc[miss, "n_aspects"] = 0
+            for col in ("aspects", "sentiments", "confidences", "probs"):
+                m[col] = m[col].apply(lambda x: x if isinstance(x, list) else [])
+        m["n_aspects"] = m["n_aspects"].astype(int)
+        return m
+
+    merged = {name: merged_for(part_df) for name, part_df in splits.items()}
+    vocab = build_aspect_vocab(merged["train"], top_k=vocab_top_k)
+    seqs = {}
+    for name, m in merged.items():
+        ids, feats, mask = build_aspect_sequences(m, vocab, max_aspects=max_aspects, fallback_scores=fb_cache)
+        seqs[name] = {"ids": ids, "feats": feats, "mask": mask}
+    logger.info(
+        "Jalur X: sequence aspek PyABSA (vocab=%d istilah, max_aspects=%d) dihitung utk semua split.",
+        len(vocab), max_aspects,
+    )
+    return vocab, seqs
+
+
 def run_pipeline(
     config: dict,
     scenario: str,
@@ -358,8 +405,8 @@ def run_pipeline(
         raise ValueError(
             f"residual_base '{residual_base}' -- pakai 'none'/'static_fusion'/'static_fusion_oof'."
         )
-    if extra_pyabsa not in ("none", "rich", "summary"):
-        raise ValueError(f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'.")
+    if extra_pyabsa not in ("none", "rich", "summary", "perseq"):
+        raise ValueError(f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'/'perseq'.")
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
 
@@ -563,7 +610,9 @@ def run_pipeline(
         # A2-IRM (base) TIDAK punya -- SENGAJA tidak dimasukkan ke base,
         # supaya kalau AGF mengoreksi base ke bawah A2-IRM, itu jelas berkat
         # sinyal PyABSA+attention (bukan re-fit fitur yg sama).
-        if extra_pyabsa != "none":
+        aspect_seq = None  # Jalur X: sequence aspek utk AspectSequencePooling
+        aspect_vocab = None
+        if extra_pyabsa in ("rich", "summary"):
             splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
             pyabsa_extra = _compute_pyabsa_rich_modality(
                 config, exp_cfg, splits_for_pyabsa, rich=(extra_pyabsa == "rich")
@@ -571,6 +620,11 @@ def run_pipeline(
             all_feature_sources["pyabsa"] = pyabsa_extra
             if "pyabsa" not in modalities:
                 modalities = modalities + ["pyabsa"]
+        elif extra_pyabsa == "perseq":
+            splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
+            aspect_vocab, aspect_seq = _compute_pyabsa_aspect_sequences(
+                config, exp_cfg, splits_for_pyabsa
+            )
 
         # RESIDUAL base: base = prediksi NMF+DecisionTree (sama spt A2-IRM)
         # atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar koreksi di
@@ -697,20 +751,27 @@ def run_pipeline(
             use_attention=scenario_cfg["use_attention"],
             pooling=scenario_cfg["pooling"],
             residual=(residual_base != "none"),
+            aspect_pooling=(extra_pyabsa == "perseq"),
+            aspect_vocab_size=(len(aspect_vocab) if aspect_vocab is not None else 0),
+            aspect_emb_dim=config.get("agf", {}).get("aspect_emb_dim", 16),
         )
         agf_trainer = AttentionGatedFusionTrainer(modality_dims, agf_cfg)
         train_time = agf_trainer.fit(
             build_features("train"), train_y_norm, build_features("val"), val_y_norm,
             train_base_norm=(base_norm["train"] if base_norm else None),
             val_base_norm=(base_norm["val"] if base_norm else None),
+            train_aspect_seq=(aspect_seq["train"] if aspect_seq else None),
+            val_aspect_seq=(aspect_seq["val"] if aspect_seq else None),
         )
         n_params = agf_trainer.n_parameters
-        gate_modalities = modalities  # modalitas aktual (bisa termasuk 'pyabsa' ekstra)
+        # modalitas aktual utk nama kolom gate (+ token aspek kalau perseq)
+        gate_modalities = modalities + (["pyabsa_aspect"] if extra_pyabsa == "perseq" else [])
 
         t0 = time.time()
         test_final_preds, gate_weights_test = agf_trainer.predict(
             build_features("test"), rating_scale,
             base_norm=(base_norm["test"] if base_norm else None),
+            aspect_seq=(aspect_seq["test"] if aspect_seq else None),
         )
         predict_time = time.time() - t0
         test_final_preds = np.clip(test_final_preds, rating_scale[0], rating_scale[1])
@@ -823,9 +884,10 @@ if __name__ == "__main__":
         help="Override agf.weight_decay (L2 Adam) -- utk residual, menekan koreksi ke robust-only.",
     )
     parser.add_argument(
-        "--extra-pyabsa", type=str, default="none", choices=["none", "rich", "summary"],
-        help="Tambah modalitas PyABSA per-aspek ke AGF (BUKAN ke base): 'rich'=order-stats kontras, "
-        "'summary'=5-dim rata-rata. Sinyal BARU utk koreksi residual mengalahkan A2-IRM base.",
+        "--extra-pyabsa", type=str, default="none", choices=["none", "rich", "summary", "perseq"],
+        help="Tambah sinyal PyABSA per-aspek ke AGF (BUKAN ke base): 'rich'=order-stats kontras (fixed, "
+        "tree juga bisa), 'summary'=5-dim rata-rata, 'perseq'=Jalur X sequence aspek + IDENTITAS via "
+        "AspectSequencePooling (tree TAK BISA -- keunggulan struktural AGF).",
     )
     parser.add_argument(
         "--run-tag", type=str, default="",

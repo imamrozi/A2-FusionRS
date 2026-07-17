@@ -352,6 +352,59 @@ def vectorize_absa_features_rich(
     return out
 
 
+def build_aspect_vocab(scored_df: pd.DataFrame, top_k: int = 500) -> dict:
+    """Bangun kosakata istilah aspek open-vocabulary dari kolom 'aspects'
+    (list str) berdasar frekuensi -- ID 0 dicadangkan PAD, 1 UNK, sisanya
+    top_k istilah tersering. Dipakai AspectSequencePooling (Jalur X) supaya
+    AGF bisa membedakan IDENTITAS aspek ('baterai' vs 'layar'), sesuatu yg
+    order-statistics buang dan tree tak bisa konsumsi.
+    """
+    from collections import Counter
+
+    counter: Counter = Counter()
+    for row in scored_df.itertuples(index=False):
+        for a in row.aspects:
+            t = str(a).lower().strip()
+            if t:
+                counter[t] += 1
+    return {term: i + 2 for i, (term, _) in enumerate(counter.most_common(top_k))}
+
+
+def build_aspect_sequences(
+    scored_df: pd.DataFrame, vocab: dict, max_aspects: int = 8, fallback_scores: dict | None = None
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Ubah hasil PyABSA jadi sequence per-review (padded) utk
+    AspectSequencePooling. Return (ids, feats, mask):
+    - ids (n, max_aspects) int64: ID istilah aspek (0=PAD, 1=UNK)
+    - feats (n, max_aspects, 4) float32: [P_neg, P_neu, P_pos, confidence]
+    - mask (n, max_aspects) bool: True=aspek valid, False=padding
+
+    Baris 0-aspek diberi 1 token sintetis dari fallback sentiment (UNK id,
+    prob dari skor fallback) -- menjamin tiap baris punya >=1 token valid
+    (cegah all-padding row yg bikin attention NaN).
+    """
+    n = len(scored_df)
+    ids = np.zeros((n, max_aspects), dtype=np.int64)
+    feats = np.zeros((n, max_aspects, 4), dtype=np.float32)
+    mask = np.zeros((n, max_aspects), dtype=bool)
+
+    for i, row in enumerate(scored_df.itertuples(index=False)):
+        if row.n_aspects == 0 or not row.probs:
+            fb = (fallback_scores or {}).get(row.review_id, 0.5) if fallback_scores is not None else 0.5
+            ids[i, 0] = 1  # UNK
+            feats[i, 0] = [1.0 - fb, 0.0, fb, abs(fb - 0.5) * 2.0]
+            mask[i, 0] = True
+            continue
+        for j, (term, prob, conf) in enumerate(zip(row.aspects, row.probs, row.confidences)):
+            if j >= max_aspects:
+                break
+            ids[i, j] = vocab.get(str(term).lower().strip(), 1)  # 1=UNK
+            feats[i, j] = [float(prob[0]), float(prob[1]), float(prob[2]), float(conf)]
+            mask[i, j] = True
+
+    return ids, feats, mask
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger.info(
