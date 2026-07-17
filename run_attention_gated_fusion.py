@@ -52,7 +52,12 @@ from sklearn.preprocessing import StandardScaler
 
 from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
-from src.a2fusionrs.pyabsa_scorer import ABSA_VECTOR_FEATURE_NAMES, load_cached_scores, vectorize_absa_features
+from src.a2fusionrs.pyabsa_scorer import (
+    ABSA_VECTOR_FEATURE_NAMES,
+    load_cached_scores,
+    vectorize_absa_features,
+    vectorize_absa_features_rich,
+)
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
 from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
 from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
@@ -260,6 +265,49 @@ def _compute_absa_features(
     raise ValueError(f"absa_source '{absa_source}' tidak dikenal -- pakai 'keyword' atau 'pyabsa'.")
 
 
+def _compute_pyabsa_rich_modality(
+    config: dict, exp_cfg: dict, splits: dict, rich: bool = True
+) -> dict[str, np.ndarray]:
+    """Fitur PyABSA per-aspek (rich order-statistics kalau rich=True, atau
+    5-dim ringkasan kalau False) sbg MODALITAS EKSTRA utk AGF -- dipakai di
+    atas keyword-ABSA (agf_keyword) supaya AGF punya sinyal per-aspek BARU
+    yg tree A2-IRM tak punya. Reuse cache PyABSA + cache fallback SA-BERT yg
+    SUDAH ADA (Stage 0 & Stage 6) -- TIDAK memuat model apa pun (cepat).
+    """
+    pyabsa_cache_dir = Path(config["logging"]["checkpoint_dir"]) / "pyabsa"
+    cache_path = pyabsa_cache_dir / f"pyabsa_scores_{exp_cfg['domain']}.csv"
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"Cache skor PyABSA tidak ditemukan di {cache_path} -- jalankan run_pyabsa_scoring.py dulu."
+        )
+    pyabsa_df = load_cached_scores(str(cache_path)).set_index("review_id")
+
+    fb_path = pyabsa_cache_dir / f"sa_fallback_scores_{exp_cfg['domain']}.csv"
+    fb_cache = (
+        pd.read_csv(fb_path).set_index("review_id")["fallback_score"].to_dict() if fb_path.exists() else {}
+    )
+
+    vectorizer = vectorize_absa_features_rich if rich else vectorize_absa_features
+    out = {}
+    for name, part_df in splits.items():
+        merged = part_df[["review_id"]].merge(
+            pyabsa_df[["n_aspects", "aspects", "sentiments", "confidences", "probs"]],
+            left_on="review_id", right_index=True, how="left",
+        )
+        missing = merged["n_aspects"].isna()
+        if missing.any():
+            merged.loc[missing, "n_aspects"] = 0
+            for col in ("aspects", "sentiments", "confidences", "probs"):
+                merged[col] = merged[col].apply(lambda x: x if isinstance(x, list) else [])
+        merged["n_aspects"] = merged["n_aspects"].astype(int)
+        out[name] = vectorizer(merged, fallback_scores=fb_cache).astype(np.float32)
+    logger.info(
+        "Modalitas EKSTRA PyABSA (%s, %d fitur) dihitung utk semua split.",
+        "rich" if rich else "5-dim", out["train"].shape[1],
+    )
+    return out
+
+
 def run_pipeline(
     config: dict,
     scenario: str,
@@ -267,6 +315,7 @@ def run_pipeline(
     use_scalar_preds: bool = False,
     representation: str = "vector",
     residual_base: str = "none",
+    extra_pyabsa: str = "none",
     run_tag: str = "",
 ) -> None:
     """`input_standardize` & `use_scalar_preds` adalah 2 DIAGNOSTIK Stage 7
@@ -304,6 +353,8 @@ def run_pipeline(
         raise ValueError(
             f"residual_base '{residual_base}' -- pakai 'none'/'static_fusion'/'static_fusion_oof'."
         )
+    if extra_pyabsa not in ("none", "rich", "summary"):
+        raise ValueError(f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'.")
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
 
@@ -400,6 +451,7 @@ def run_pipeline(
     logger.info("=== Tahap 7: Fusion (skenario '%s') ===", scenario)
     n_params = None
     gate_weights_test = None
+    gate_modalities = None  # modalitas aktual yg dipakai AGF (utk nama kolom gate CSV)
 
     if scenario == "static_pyabsa":
         # Sel faktorial "Static (NMF+DT) + Model-based ABSA" -- reuse
@@ -470,6 +522,19 @@ def run_pipeline(
                     for split in ("train", "val", "test")
                 }
             logger.info("REPRESENTASI ASIMETRIS AKTIF: DeepMF/CBF -> prediksi skalar ternormalisasi.")
+
+        # MODALITAS EKSTRA PyABSA per-aspek: sinyal BARU utk AGF yg tree
+        # A2-IRM (base) TIDAK punya -- SENGAJA tidak dimasukkan ke base,
+        # supaya kalau AGF mengoreksi base ke bawah A2-IRM, itu jelas berkat
+        # sinyal PyABSA+attention (bukan re-fit fitur yg sama).
+        if extra_pyabsa != "none":
+            splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
+            pyabsa_extra = _compute_pyabsa_rich_modality(
+                config, exp_cfg, splits_for_pyabsa, rich=(extra_pyabsa == "rich")
+            )
+            all_feature_sources["pyabsa"] = pyabsa_extra
+            if "pyabsa" not in modalities:
+                modalities = modalities + ["pyabsa"]
 
         # RESIDUAL base: base = prediksi NMF+DecisionTree (sama spt A2-IRM)
         # atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar koreksi di
@@ -604,6 +669,7 @@ def run_pipeline(
             val_base_norm=(base_norm["val"] if base_norm else None),
         )
         n_params = agf_trainer.n_parameters
+        gate_modalities = modalities  # modalitas aktual (bisa termasuk 'pyabsa' ekstra)
 
         t0 = time.time()
         test_final_preds, gate_weights_test = agf_trainer.predict(
@@ -667,6 +733,7 @@ def run_pipeline(
         "use_scalar_preds": use_scalar_preds,
         "representation": representation,
         "residual_base": residual_base,
+        "extra_pyabsa": extra_pyabsa,
         "run_tag": run_tag,
         "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}'"
         + (f" [DIAGNOSTIK: {run_tag}]" if run_tag else "."),
@@ -680,7 +747,8 @@ def run_pipeline(
     # skenario memakai pooling="gate".
     if gate_weights_test is not None:
         scenario_cfg = AGF_SCENARIOS[scenario]
-        gate_df = pd.DataFrame(gate_weights_test, columns=[f"gate_{m}" for m in scenario_cfg["modalities"]])
+        gate_cols = gate_modalities if gate_modalities is not None else scenario_cfg["modalities"]
+        gate_df = pd.DataFrame(gate_weights_test, columns=[f"gate_{m}" for m in gate_cols])
         gate_df.insert(0, "review_id", test_df["review_id"].values)
         gate_path = results_dir / f"gates_{results_path.stem}.csv"
         gate_df.to_csv(gate_path, index=False)
@@ -719,6 +787,11 @@ if __name__ == "__main__":
         help="Override agf.weight_decay (L2 Adam) -- utk residual, menekan koreksi ke robust-only.",
     )
     parser.add_argument(
+        "--extra-pyabsa", type=str, default="none", choices=["none", "rich", "summary"],
+        help="Tambah modalitas PyABSA per-aspek ke AGF (BUKAN ke base): 'rich'=order-stats kontras, "
+        "'summary'=5-dim rata-rata. Sinyal BARU utk koreksi residual mengalahkan A2-IRM base.",
+    )
+    parser.add_argument(
         "--run-tag", type=str, default="",
         help="Suffix nama file hasil supaya run diagnostik tidak menimpa hasil utama 150-run (mis. 'norm').",
     )
@@ -735,5 +808,6 @@ if __name__ == "__main__":
         use_scalar_preds=args.use_scalar_preds,
         representation=args.representation,
         residual_base=args.residual_base,
+        extra_pyabsa=args.extra_pyabsa,
         run_tag=args.run_tag,
     )

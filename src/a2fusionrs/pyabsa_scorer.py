@@ -281,6 +281,77 @@ def vectorize_absa_features(
     return out
 
 
+ABSA_RICH_FEATURE_NAMES = [
+    "n_aspects_norm",        # jumlah aspek (bukti tekstual)
+    "mean_positive_prob",    # rata-rata P(pos)
+    "min_positive_prob",     # aspek PALING NEGATIF (kontras!)
+    "max_positive_prob",     # aspek PALING POSITIF
+    "range_positive_prob",   # spread = max-min (heterogenitas antar-aspek)
+    "max_negative_prob",     # sinyal negatif terkuat
+    "mean_confidence",       # rata-rata confidence
+    "frac_negative_aspects", # fraksi aspek berlabel negatif (argmax=neg)
+    "frac_positive_aspects", # fraksi aspek berlabel positif (argmax=pos)
+]
+
+
+def vectorize_absa_features_rich(
+    scored_df: pd.DataFrame,
+    fallback_scores: dict | None = None,
+    evidence_cap: int = 3,
+) -> np.ndarray:
+    """Versi KAYA dari vectorize_absa_features: alih-alih hanya rata-rata
+    (yang -- seperti varian 'Mean' A2-IRM -- MERUSAK kontras antar-aspek),
+    fungsi ini mempertahankan STATISTIK URUTAN yang menangkap kontras:
+    min/max/range P(pos) antar aspek, sinyal negatif terkuat, dan fraksi
+    aspek negatif/positif.
+
+    Motivasi (Stage 7+): tree A2-IRM ada di plafon utk fitur keyword-ABSA +
+    DeepMF + CBF. Info PyABSA per-aspek (aspek open-vocabulary + sentimen
+    individual) adalah sinyal BARU yg (a) keyword ABSA lewatkan, (b)
+    averaging hancurkan, (c) tree tak bisa konsumsi tapi attention AGF bisa.
+    Order-statistics ini versi fixed-size murah yg mempertahankan kontras --
+    kalau ini sudah menambah sinyal ke koreksi residual AGF, full per-aspek
+    attention-pooling (lebih mahal) baru dikerjakan.
+
+    Contoh yg dibedakan dari mean: "produk bagus TAPI 1 aspek fatal negatif"
+    -> min_positive_prob rendah, max_negative_prob tinggi, frac_negative>0 --
+    semua ketangkap, sedangkan mean membaurkannya jadi 'agak positif'.
+
+    Return: array (n, 9), urutan kolom = ABSA_RICH_FEATURE_NAMES.
+    """
+    n = len(scored_df)
+    out = np.zeros((n, len(ABSA_RICH_FEATURE_NAMES)), dtype=np.float32)
+
+    for row_idx, row in enumerate(scored_df.itertuples(index=False)):
+        probs = row.probs  # list [neg, neu, pos] per aspek
+        confidences = row.confidences
+
+        if row.n_aspects == 0 or not probs:
+            fb = (fallback_scores or {}).get(row.review_id, 0.5) if fallback_scores is not None else 0.5
+            # mean/min/max_pos = fallback; kontras & fraksi = 0 (tidak ada aspek)
+            out[row_idx] = [0.0, fb, fb, fb, 0.0, 1.0 - fb, 0.0, 0.0, 0.0]
+            continue
+
+        pos = np.array([p[2] for p in probs], dtype=np.float32)
+        neg = np.array([p[0] for p in probs], dtype=np.float32)
+        conf = np.array(confidences, dtype=np.float32)
+        argmax = np.array([int(np.argmax(p)) for p in probs])  # 0=neg,1=neu,2=pos
+
+        out[row_idx] = [
+            min(row.n_aspects / evidence_cap, 1.0),
+            float(pos.mean()),
+            float(pos.min()),
+            float(pos.max()),
+            float(pos.max() - pos.min()),
+            float(neg.max()),
+            float(conf.mean()) if len(conf) else 0.0,
+            float((argmax == 0).mean()),
+            float((argmax == 2).mean()),
+        ]
+
+    return out
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger.info(
