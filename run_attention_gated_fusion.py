@@ -300,8 +300,10 @@ def run_pipeline(
     """
     if representation not in ("vector", "asymmetric"):
         raise ValueError(f"representation '{representation}' -- pakai 'vector' atau 'asymmetric'.")
-    if residual_base not in ("none", "static_fusion"):
-        raise ValueError(f"residual_base '{residual_base}' -- pakai 'none' atau 'static_fusion'.")
+    if residual_base not in ("none", "static_fusion", "static_fusion_oof"):
+        raise ValueError(
+            f"residual_base '{residual_base}' -- pakai 'none'/'static_fusion'/'static_fusion_oof'."
+        )
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
 
@@ -469,26 +471,68 @@ def run_pipeline(
                 }
             logger.info("REPRESENTASI ASIMETRIS AKTIF: DeepMF/CBF -> prediksi skalar ternormalisasi.")
 
-        # RESIDUAL base=static_fusion: base = prediksi NMF+DecisionTree (sama
-        # spt A2-IRM) atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar
-        # koreksi di atasnya. base pakai KETIGA sinyal terlepas modalitas
-        # aktif skenario (base = referensi kuat, bukan bagian ablasi).
+        # RESIDUAL base: base = prediksi NMF+DecisionTree (sama spt A2-IRM)
+        # atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar koreksi di
+        # atasnya. base pakai KETIGA sinyal terlepas modalitas aktif skenario.
+        #
+        # "static_fusion" (lama, CACAT): base train IN-FOLD -- DecisionTree
+        #   fit train ~sempurna -> residual train ~0 -> AGF tak belajar apa2
+        #   (bug stacking klasik). Disimpan HANYA utk perbandingan.
+        # "static_fusion_oof" (BENAR): base train OUT-OF-FOLD (5-fold CV) --
+        #   tiap sampel train diprediksi base yg TIDAK dilatih dgnnya ->
+        #   residual train NYATA -> AGF punya sinyal utk dipelajari & bisa
+        #   transfer ke test. val/test tetap dari base fit-seluruh-train
+        #   (sudah out-of-sample).
         base_norm = None
-        if residual_base == "static_fusion":
+        if residual_base in ("static_fusion", "static_fusion_oof"):
             fusion_config = FusionConfig(
                 nmf_components=config["fusion_baseline"]["nmf_components"],
                 dt_max_depth=config["fusion_baseline"]["dt_max_depth"],
                 random_state=exp_cfg["seed"],
             )
+            base_norm = {}
+            y_train = train_df["stars"].values
+
+            if residual_base == "static_fusion_oof":
+                from sklearn.model_selection import KFold
+                n_folds = 5
+                kf = KFold(n_splits=n_folds, shuffle=True, random_state=exp_cfg["seed"])
+                oof_train = np.zeros(len(train_df), dtype=np.float64)
+                for tr_idx, oof_idx in kf.split(np.arange(len(train_df))):
+                    fold_fusion = NMFDecisionTreeFusion(fusion_config)
+                    fold_fusion.fit(
+                        sentiment_scores=absa_features["train"][tr_idx],
+                        deepmf_preds=deepmf_scalar["train"][tr_idx],
+                        cbf_preds=cbf_scalar["train"][tr_idx],
+                        y_true_ratings=y_train[tr_idx],
+                    )
+                    oof_train[oof_idx] = fold_fusion.predict(
+                        sentiment_scores=absa_features["train"][oof_idx],
+                        deepmf_preds=deepmf_scalar["train"][oof_idx],
+                        cbf_preds=cbf_scalar["train"][oof_idx],
+                    )
+                base_norm["train"] = (
+                    (np.clip(oof_train, rating_min, rating_max) - rating_min) / scale_range
+                ).astype(np.float32)
+                oof_rmse = float(np.sqrt(np.mean(
+                    (np.clip(oof_train, rating_min, rating_max) - y_train) ** 2)))
+                logger.info(
+                    "RESIDUAL OOF: base train %d-fold OOF RMSE=%.4f (residual train NYATA, bukan ~0).",
+                    n_folds, oof_rmse,
+                )
+
+            # base fit di SELURUH train -> prediksi val & test (out-of-sample),
+            # dan train juga kalau mode in-fold lama.
             base_fusion = NMFDecisionTreeFusion(fusion_config)
             base_fusion.fit(
                 sentiment_scores=absa_features["train"],
                 deepmf_preds=deepmf_scalar["train"],
                 cbf_preds=cbf_scalar["train"],
-                y_true_ratings=train_df["stars"].values,
+                y_true_ratings=y_train,
             )
-            base_norm = {}
             for split in ("train", "val", "test"):
+                if split == "train" and residual_base == "static_fusion_oof":
+                    continue  # train sudah diisi OOF di atas
                 base_pred = base_fusion.predict(
                     sentiment_scores=absa_features[split],
                     deepmf_preds=deepmf_scalar[split],
@@ -501,8 +545,8 @@ def run_pipeline(
                 (np.clip(base_fusion.predict(absa_features["test"], deepmf_scalar["test"], cbf_scalar["test"]),
                          rating_min, rating_max) - test_df["stars"].values) ** 2)))
             logger.info(
-                "RESIDUAL base=static_fusion AKTIF: base NMF+DT (RMSE test base=%.4f), AGF belajar koreksi.",
-                base_test_rmse,
+                "RESIDUAL base=%s AKTIF: base NMF+DT (RMSE test base=%.4f), AGF belajar koreksi.",
+                residual_base, base_test_rmse,
             )
 
         # DIAGNOSTIK 1 (use_scalar_preds): tambahkan prediksi rating skalar
@@ -665,8 +709,10 @@ if __name__ == "__main__":
         help="REDESIGN Gap 2: 'asymmetric' = DeepMF/CBF pakai prediksi skalar (bukan laten/fitur), ABSA tetap vektor.",
     )
     parser.add_argument(
-        "--residual-base", type=str, default="none", choices=["none", "static_fusion"],
-        help="REDESIGN Gap 2: 'static_fusion' = AGF belajar KOREKSI di atas prediksi NMF+DecisionTree (base A2-IRM).",
+        "--residual-base", type=str, default="none",
+        choices=["none", "static_fusion", "static_fusion_oof"],
+        help="REDESIGN Gap 2: AGF belajar KOREKSI di atas base NMF+DT. 'static_fusion_oof' = base train "
+        "out-of-fold (stacking BENAR); 'static_fusion' = in-fold (cacat, utk perbandingan).",
     )
     parser.add_argument(
         "--weight-decay", type=float, default=None,
