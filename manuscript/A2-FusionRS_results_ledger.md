@@ -34,10 +34,15 @@ Prefix file: `<prefix>_<domain>_seed<seed>.yaml`
 | DeepFM | `neural_cf_deepfm` | 1,1529±,002 | 1,0746±,002 | 0,8393±,001 |
 | A2-IRM (concat+conf) | `absa_ablation_concat_confidence` | 0,6517±,003 | 0,6791±,001 | 0,6291±,003 |
 | **A2-FusionRS** | `agf_agf_keyword_oof_perseq` | **0,6418±,002** | **0,6665±,001** | **0,6196±,003** |
-| Global Mean Predictor | (referensi) | _TBD_ | _TBD_ | _TBD_ |
+| Global Mean Predictor | (referensi) | 1,2143 | 1,1516 | 0,9163 |
+| _rating_std(test)_ | (identitas) | 1,2120 | 1,1513 | 0,9133 |
 
-> Global Mean Predictor: jalankan cell sanity (train mean → test RMSE). Diharapkan
-> ~1,1–1,2 → menunjukkan CF murni ≈ prediksi rata-rata pada sparsity ekstrem.
+> Global Mean Predictor ≈ rating_std (identitas matematis) → konfirmasi angka konsisten.
+> TEMUAN PENTING: Item-KNN Hotel (0,9163) = PERSIS Global-Mean Hotel (0,9163) →
+> Item-KNN berdegenerasi ke prediksi rata-rata (tak ada tetangga co-rating di data
+> sparse); di Amazon/Restaurant malah > mean (tetangga bising). CF murni yang
+> berfungsi (SVD/NeuMF/DeepFM) hanya −2…−8% dari mean; sinyal review menekan
+> −31…−47%. Ini pembelaan reviewer-proof bahwa baseline BUKAN strawman.
 
 ## 3. Ablasi komponen A2-FusionRS — RMSE mean±SD (5 seed)
 
