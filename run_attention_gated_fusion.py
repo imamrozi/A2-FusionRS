@@ -265,6 +265,8 @@ def run_pipeline(
     scenario: str,
     input_standardize: bool = False,
     use_scalar_preds: bool = False,
+    representation: str = "vector",
+    residual_base: str = "none",
     run_tag: str = "",
 ) -> None:
     """`input_standardize` & `use_scalar_preds` adalah 2 DIAGNOSTIK Stage 7
@@ -281,9 +283,25 @@ def run_pipeline(
       modalitas masing-masing -- AGF versi asli MEMBUANG ini, cuma pakai
       laten/fitur mentah.
 
+    `representation` ("vector"|"asymmetric") & `residual_base` ("none"|
+    "static_fusion") adalah REDESIGN Stage 7+ (hasil analisis akar Gap 2):
+    - representation="asymmetric": DeepMF/CBF masuk sbg PREDIKSI SKALAR
+      ternormalisasi (sinyal terkuat mereka -- mereka prediktor rating,
+      laten mentahnya harus di-decode ulang oleh jaringan kecil), ABSA
+      tetap vektor kaya (satu-satunya modalitas yg benar diuntungkan
+      representasi kaya).
+    - residual_base="static_fusion": base = prediksi NMF+DecisionTree (sama
+      seperti A2-IRM) dihitung dari [absa, deepmf_scalar, cbf_scalar]; AGF
+      belajar KOREKSI adaptif di atasnya. By-construction >= base, jadi
+      target "kalahkan A2-IRM" tinggal soal apakah koreksi menambah nilai.
+
     `run_tag`: suffix ke nama file hasil supaya run diagnostik TIDAK menimpa
     hasil utama 150-run (mis. run_tag='norm' -> agf_full_agf_norm_...yaml).
     """
+    if representation not in ("vector", "asymmetric"):
+        raise ValueError(f"representation '{representation}' -- pakai 'vector' atau 'asymmetric'.")
+    if residual_base not in ("none", "static_fusion"):
+        raise ValueError(f"residual_base '{residual_base}' -- pakai 'none' atau 'static_fusion'.")
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
 
@@ -435,6 +453,58 @@ def run_pipeline(
 
         all_feature_sources = {"deepmf": deepmf_latent, "cbf": cbf_features, "absa": absa_features}
 
+        rating_min, rating_max = rating_scale
+        scale_range = rating_max - rating_min
+
+        # REPRESENTASI ASIMETRIS (redesign Gap 2): DeepMF/CBF diganti PREDIKSI
+        # SKALAR ternormalisasi (bukan laten/fitur mentah) -- keduanya
+        # prediktor rating, sinyal terkuatnya = output skalarnya. ABSA tetap
+        # vektor kaya (tidak diubah). Menjawab temuan leave_out_deepmf~=full_agf
+        # (laten DeepMF nyaris tak berkontribusi).
+        if representation == "asymmetric":
+            for mod, scalar_dict in {"deepmf": deepmf_scalar, "cbf": cbf_scalar}.items():
+                all_feature_sources[mod] = {
+                    split: ((scalar_dict[split].reshape(-1, 1) - rating_min) / scale_range).astype(np.float32)
+                    for split in ("train", "val", "test")
+                }
+            logger.info("REPRESENTASI ASIMETRIS AKTIF: DeepMF/CBF -> prediksi skalar ternormalisasi.")
+
+        # RESIDUAL base=static_fusion: base = prediksi NMF+DecisionTree (sama
+        # spt A2-IRM) atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar
+        # koreksi di atasnya. base pakai KETIGA sinyal terlepas modalitas
+        # aktif skenario (base = referensi kuat, bukan bagian ablasi).
+        base_norm = None
+        if residual_base == "static_fusion":
+            fusion_config = FusionConfig(
+                nmf_components=config["fusion_baseline"]["nmf_components"],
+                dt_max_depth=config["fusion_baseline"]["dt_max_depth"],
+                random_state=exp_cfg["seed"],
+            )
+            base_fusion = NMFDecisionTreeFusion(fusion_config)
+            base_fusion.fit(
+                sentiment_scores=absa_features["train"],
+                deepmf_preds=deepmf_scalar["train"],
+                cbf_preds=cbf_scalar["train"],
+                y_true_ratings=train_df["stars"].values,
+            )
+            base_norm = {}
+            for split in ("train", "val", "test"):
+                base_pred = base_fusion.predict(
+                    sentiment_scores=absa_features[split],
+                    deepmf_preds=deepmf_scalar[split],
+                    cbf_preds=cbf_scalar[split],
+                )
+                base_norm[split] = (
+                    (np.clip(base_pred, rating_min, rating_max) - rating_min) / scale_range
+                ).astype(np.float32)
+            base_test_rmse = float(np.sqrt(np.mean(
+                (np.clip(base_fusion.predict(absa_features["test"], deepmf_scalar["test"], cbf_scalar["test"]),
+                         rating_min, rating_max) - test_df["stars"].values) ** 2)))
+            logger.info(
+                "RESIDUAL base=static_fusion AKTIF: base NMF+DT (RMSE test base=%.4f), AGF belajar koreksi.",
+                base_test_rmse,
+            )
+
         # DIAGNOSTIK 1 (use_scalar_preds): tambahkan prediksi rating skalar
         # DeepMF/CBF (yg SUDAH terkalibrasi) sbg 1 kolom fitur ekstra di
         # modalitas masing-masing. AGF versi asli cuma pakai laten/fitur
@@ -469,8 +539,6 @@ def run_pipeline(
         def build_features(split_name: str) -> dict[str, np.ndarray]:
             return {m: all_feature_sources[m][split_name] for m in modalities}
 
-        rating_min, rating_max = rating_scale
-        scale_range = rating_max - rating_min
         train_y_norm = ((train_df["stars"].values - rating_min) / scale_range).astype(np.float32)
         val_y_norm = ((val_df["stars"].values - rating_min) / scale_range).astype(np.float32)
 
@@ -482,13 +550,21 @@ def run_pipeline(
             learning_rate=config.get("agf", {}).get("learning_rate", 0.001),
             use_attention=scenario_cfg["use_attention"],
             pooling=scenario_cfg["pooling"],
+            residual=(residual_base != "none"),
         )
         agf_trainer = AttentionGatedFusionTrainer(modality_dims, agf_cfg)
-        train_time = agf_trainer.fit(build_features("train"), train_y_norm, build_features("val"), val_y_norm)
+        train_time = agf_trainer.fit(
+            build_features("train"), train_y_norm, build_features("val"), val_y_norm,
+            train_base_norm=(base_norm["train"] if base_norm else None),
+            val_base_norm=(base_norm["val"] if base_norm else None),
+        )
         n_params = agf_trainer.n_parameters
 
         t0 = time.time()
-        test_final_preds, gate_weights_test = agf_trainer.predict(build_features("test"), rating_scale)
+        test_final_preds, gate_weights_test = agf_trainer.predict(
+            build_features("test"), rating_scale,
+            base_norm=(base_norm["test"] if base_norm else None),
+        )
         predict_time = time.time() - t0
         test_final_preds = np.clip(test_final_preds, rating_scale[0], rating_scale[1])
 
@@ -544,6 +620,8 @@ def run_pipeline(
         "n_parameters": n_params,
         "input_standardize": input_standardize,
         "use_scalar_preds": use_scalar_preds,
+        "representation": representation,
+        "residual_base": residual_base,
         "run_tag": run_tag,
         "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}'"
         + (f" [DIAGNOSTIK: {run_tag}]" if run_tag else "."),
@@ -582,6 +660,14 @@ if __name__ == "__main__":
         help="DIAGNOSTIK Stage 7: umpankan prediksi skalar DeepMF/CBF sbg fitur tambahan (default off).",
     )
     parser.add_argument(
+        "--representation", type=str, default="vector", choices=["vector", "asymmetric"],
+        help="REDESIGN Gap 2: 'asymmetric' = DeepMF/CBF pakai prediksi skalar (bukan laten/fitur), ABSA tetap vektor.",
+    )
+    parser.add_argument(
+        "--residual-base", type=str, default="none", choices=["none", "static_fusion"],
+        help="REDESIGN Gap 2: 'static_fusion' = AGF belajar KOREKSI di atas prediksi NMF+DecisionTree (base A2-IRM).",
+    )
+    parser.add_argument(
         "--run-tag", type=str, default="",
         help="Suffix nama file hasil supaya run diagnostik tidak menimpa hasil utama 150-run (mis. 'norm').",
     )
@@ -594,5 +680,7 @@ if __name__ == "__main__":
         cfg, args.scenario,
         input_standardize=args.input_standardize,
         use_scalar_preds=args.use_scalar_preds,
+        representation=args.representation,
+        residual_base=args.residual_base,
         run_tag=args.run_tag,
     )

@@ -55,6 +55,13 @@ class AGFConfig:
     learning_rate: float = 0.001
     use_attention: bool = True
     pooling: str = "gate"  # "gate" | "mean" | "concat"
+    # residual: kalau True, model memprediksi KOREKSI di atas prediksi base
+    # (base + head(fused), TANPA sigmoid) alih-alih prediksi absolut
+    # (sigmoid(head(fused))). Alasan (Stage 7 root-cause): DecisionTree
+    # A2-IRM sulit dikalahkan dari nol; struktur residual membuat AGF
+    # "base + koreksi adaptif" -- kalau koreksi=0 menyamai base, koreksi yg
+    # membantu MENGALAHKAN base. base diberikan per-baris via fit()/predict().
+    residual: bool = False
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     def __post_init__(self) -> None:
@@ -106,8 +113,11 @@ class AttentionGatedFusionModel(nn.Module):
         )
 
     def forward(
-        self, features: dict[str, torch.Tensor]
+        self, features: dict[str, torch.Tensor], base: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
+        # `base`: prediksi base ternormalisasi (batch,) -- WAJIB kalau
+        # config.residual=True (model memprediksi base + koreksi), diabaikan
+        # kalau residual=False.
         # Proyeksi tiap modalitas ke dimensi bersama d, susun jadi sequence
         # (batch, n_modalitas, d) -- urutan token = self.modalities (FIXED,
         # lihat docstring kelas).
@@ -131,7 +141,14 @@ class AttentionGatedFusionModel(nn.Module):
             gate_weights = torch.softmax(gate_logits, dim=-1)  # (batch, n_mod), jumlah=1 per baris
             fused = (tokens * gate_weights.unsqueeze(-1)).sum(dim=1)  # (batch, d)
 
-        pred = torch.sigmoid(self.prediction_head(fused)).squeeze(-1)
+        head_out = self.prediction_head(fused).squeeze(-1)
+        if self.config.residual:
+            if base is None:
+                raise ValueError("config.residual=True tapi `base` tidak diberikan ke forward().")
+            # KOREKSI aditif (tanpa sigmoid) di atas base -- residual bisa +/-.
+            pred = base + head_out
+        else:
+            pred = torch.sigmoid(head_out)
         return pred, gate_weights, attn_weights
 
 
@@ -168,18 +185,29 @@ class AttentionGatedFusionTrainer:
         train_ratings_norm: np.ndarray,
         val_features: dict[str, np.ndarray] | None = None,
         val_ratings_norm: np.ndarray | None = None,
+        train_base_norm: np.ndarray | None = None,
+        val_base_norm: np.ndarray | None = None,
     ) -> float:
         """`*_ratings_norm` HARUS sudah dinormalisasi ke (0,1) (konvensi sama
         dgn DeepMF/InteractionDataset) -- denormalisasi ke skala rating asli
         terjadi di predict(), bukan di sini.
 
+        `*_base_norm`: prediksi base ternormalisasi (WAJIB kalau
+        config.residual=True) -- model belajar KOREKSI di atas base ini.
+
         Return: waktu training (detik) -- dicatat di sini (bukan di caller)
         supaya konsisten dipakai semua pemanggil untuk Tabel efisiensi
         Tier 3 (lihat attention_gated_fusion_design.md Bagian 3, poin 8).
         """
+        if self.config.residual and train_base_norm is None:
+            raise ValueError("config.residual=True tapi train_base_norm tidak diberikan ke fit().")
         t0 = time.time()
         train_tensors = self._to_tensors(train_features)
         y_tensor = torch.tensor(train_ratings_norm, dtype=torch.float32, device=self.config.device)
+        base_tensor = (
+            torch.tensor(train_base_norm, dtype=torch.float32, device=self.config.device)
+            if train_base_norm is not None else None
+        )
         n_samples = len(train_ratings_norm)
 
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
@@ -197,9 +225,10 @@ class AttentionGatedFusionTrainer:
                 idx = perm[start : start + self.config.batch_size]
                 batch_features = {name: t[idx] for name, t in train_tensors.items()}
                 batch_y = y_tensor[idx]
+                batch_base = base_tensor[idx] if base_tensor is not None else None
 
                 optimizer.zero_grad()
-                pred, _, _ = self.model(batch_features)
+                pred, _, _ = self.model(batch_features, base=batch_base)
                 loss = criterion(pred, batch_y)
                 loss.backward()
                 optimizer.step()
@@ -208,7 +237,7 @@ class AttentionGatedFusionTrainer:
 
             log_msg = f"AGF epoch {epoch + 1}/{self.config.epochs} - train MSE: {epoch_loss / n_batches:.4f}"
             if val_features is not None and val_ratings_norm is not None:
-                val_rmse = self.evaluate_rmse(val_features, val_ratings_norm)
+                val_rmse = self.evaluate_rmse(val_features, val_ratings_norm, val_base_norm)
                 log_msg += f" - val RMSE (normalized): {val_rmse:.4f}"
                 if val_rmse < best_val_rmse:
                     best_val_rmse = val_rmse
@@ -229,30 +258,45 @@ class AttentionGatedFusionTrainer:
         return train_time
 
     @torch.no_grad()
-    def evaluate_rmse(self, features: dict[str, np.ndarray], ratings_norm: np.ndarray) -> float:
+    def evaluate_rmse(
+        self, features: dict[str, np.ndarray], ratings_norm: np.ndarray, base_norm: np.ndarray | None = None
+    ) -> float:
         self.model.eval()
         tensors = self._to_tensors(features)
         y_tensor = torch.tensor(ratings_norm, dtype=torch.float32, device=self.config.device)
-        pred, _, _ = self.model(tensors)
+        base_tensor = (
+            torch.tensor(base_norm, dtype=torch.float32, device=self.config.device)
+            if base_norm is not None else None
+        )
+        pred, _, _ = self.model(tensors, base=base_tensor)
         rmse = torch.sqrt(torch.mean((pred - y_tensor) ** 2)).item()
         self.model.train()
         return rmse
 
     @torch.no_grad()
     def predict(
-        self, features: dict[str, np.ndarray], rating_scale: tuple[float, float] = (1.0, 5.0)
+        self,
+        features: dict[str, np.ndarray],
+        rating_scale: tuple[float, float] = (1.0, 5.0),
+        base_norm: np.ndarray | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         """Return (prediksi rating skala asli, bobot gate per-baris -- None
-        kalau pooling != 'gate'). Bobot gate disimpan terpisah oleh
-        pemanggil (Stage 3) untuk analisis interpretability (Tier 3, lihat
-        attention_gated_fusion_design.md Bagian 3, poin 9)."""
+        kalau pooling != 'gate'). `base_norm` WAJIB kalau config.residual=True.
+        Bobot gate disimpan terpisah oleh pemanggil (Stage 3) untuk analisis
+        interpretability (Tier 3, lihat design doc Bagian 3, poin 9)."""
+        if self.config.residual and base_norm is None:
+            raise ValueError("config.residual=True tapi base_norm tidak diberikan ke predict().")
         t0 = time.time()
         self.model.eval()
         rating_min, rating_max = rating_scale
         scale_range = rating_max - rating_min
 
         tensors = self._to_tensors(features)
-        pred, gate_weights, _ = self.model(tensors)
+        base_tensor = (
+            torch.tensor(base_norm, dtype=torch.float32, device=self.config.device)
+            if base_norm is not None else None
+        )
+        pred, gate_weights, _ = self.model(tensors, base=base_tensor)
 
         preds = pred.cpu().numpy() * scale_range + rating_min
         gates = gate_weights.cpu().numpy() if gate_weights is not None else None
