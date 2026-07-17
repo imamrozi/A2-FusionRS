@@ -548,6 +548,7 @@ def run_pipeline(
             epochs=config.get("agf", {}).get("epochs", 30),
             batch_size=config.get("agf", {}).get("batch_size", 512),
             learning_rate=config.get("agf", {}).get("learning_rate", 0.001),
+            weight_decay=config.get("agf", {}).get("weight_decay", 0.0),
             use_attention=scenario_cfg["use_attention"],
             pooling=scenario_cfg["pooling"],
             residual=(residual_base != "none"),
@@ -668,6 +669,10 @@ if __name__ == "__main__":
         help="REDESIGN Gap 2: 'static_fusion' = AGF belajar KOREKSI di atas prediksi NMF+DecisionTree (base A2-IRM).",
     )
     parser.add_argument(
+        "--weight-decay", type=float, default=None,
+        help="Override agf.weight_decay (L2 Adam) -- utk residual, menekan koreksi ke robust-only.",
+    )
+    parser.add_argument(
         "--run-tag", type=str, default="",
         help="Suffix nama file hasil supaya run diagnostik tidak menimpa hasil utama 150-run (mis. 'norm').",
     )
@@ -676,6 +681,8 @@ if __name__ == "__main__":
     cfg = load_config(args.config)
     if args.seed is not None:
         cfg["experiment"]["seed"] = args.seed
+    if args.weight_decay is not None:
+        cfg.setdefault("agf", {})["weight_decay"] = args.weight_decay
     run_pipeline(
         cfg, args.scenario,
         input_standardize=args.input_standardize,

@@ -53,6 +53,9 @@ class AGFConfig:
     epochs: int = 30
     batch_size: int = 512
     learning_rate: float = 0.001
+    weight_decay: float = 0.0  # L2 regularisasi Adam -- utk mode residual,
+    # weight_decay>0 menekan koreksi ke arah nol (belajar hanya koreksi
+    # robust, bukan overfit noise train). Default 0 = perilaku lama.
     use_attention: bool = True
     pooling: str = "gate"  # "gate" | "mean" | "concat"
     # residual: kalau True, model memprediksi KOREKSI di atas prediksi base
@@ -210,7 +213,9 @@ class AttentionGatedFusionTrainer:
         )
         n_samples = len(train_ratings_norm)
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.learning_rate)
+        optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.config.learning_rate, weight_decay=self.config.weight_decay
+        )
         criterion = nn.MSELoss()
 
         best_val_rmse = float("inf")
