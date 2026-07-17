@@ -97,7 +97,12 @@ AGF_SCENARIOS: dict[str, dict] = {
     "leave_out_absa": dict(modalities=["deepmf", "cbf"], use_attention=True, pooling="gate"),
     "concat_mlp": dict(modalities=["deepmf", "cbf", "absa"], use_attention=False, pooling="concat"),
 }
-NON_AGF_SCENARIOS = ("static_pyabsa", "weighted_avg")
+# static_keyword_pyabsa: KONTROL ATRIBUSI (Stage 7+) -- tree NMF+DT (sama
+# spt A2-IRM) TAPI diberi keyword ABSA + PyABSA-rich sekaligus. Menjawab
+# "apakah tree juga membaik dgn PyABSA, atau cuma AGF?" -- kalau tree+pyabsa
+# ~= AGF+pyabsa, PyABSA-nya yg komplementer (AGF bukan mekanisme unik);
+# kalau tree+pyabsa jauh lebih buruk, AGF mengeksploitasi PyABSA lebih baik.
+NON_AGF_SCENARIOS = ("static_pyabsa", "weighted_avg", "static_keyword_pyabsa")
 ALL_SCENARIOS = list(AGF_SCENARIOS) + list(NON_AGF_SCENARIOS)
 
 
@@ -384,6 +389,8 @@ def run_pipeline(
     sa_checkpoint_dir = Path(config["logging"]["checkpoint_dir"]) / "sentiment_bert"
     default_absa_source = config.get("agf", {}).get("absa_source", "pyabsa")
     absa_source = AGF_SCENARIOS.get(scenario, {}).get("absa_source_override", default_absa_source)
+    if scenario == "static_keyword_pyabsa":
+        absa_source = "keyword"  # kontrol pakai keyword ABSA (spt A2-IRM) + PyABSA-rich di tree
     logger.info("Sumber ABSA untuk skenario '%s': '%s'", scenario, absa_source)
 
     absa_result = _compute_absa_features(
@@ -497,6 +504,35 @@ def run_pipeline(
         test_final_preds = np.clip(lr.predict(X_test), rating_scale[0], rating_scale[1])
         predict_time = time.time() - t0
         n_params = X_train.shape[1] + 1  # bobot + intercept
+
+    elif scenario == "static_keyword_pyabsa":
+        # KONTROL ATRIBUSI: tree NMF+DT (sama spt A2-IRM) TAPI sentiment =
+        # [keyword ABSA (concat+conf) HSTACK PyABSA-rich]. deepmf/cbf skalar
+        # sama. Kalau ini mengalahkan A2-IRM sebanyak AGF+pyabsa -> tree juga
+        # bisa pakai PyABSA (AGF bukan mekanisme unik). NMFDecisionTreeFusion
+        # sudah generik terima sentiment 2D multi-kolom.
+        splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
+        pyabsa_rich = _compute_pyabsa_rich_modality(config, exp_cfg, splits_for_pyabsa, rich=True)
+        sent = {s: np.hstack([absa_features[s], pyabsa_rich[s]]) for s in ("train", "test")}
+        fusion_config = FusionConfig(
+            nmf_components=config["fusion_baseline"]["nmf_components"],
+            dt_max_depth=config["fusion_baseline"]["dt_max_depth"],
+            random_state=exp_cfg["seed"],
+        )
+        fusion_model = NMFDecisionTreeFusion(fusion_config)
+        t0 = time.time()
+        fusion_model.fit(
+            sentiment_scores=sent["train"], deepmf_preds=deepmf_scalar["train"],
+            cbf_preds=cbf_scalar["train"], y_true_ratings=train_df["stars"].values,
+        )
+        train_time = time.time() - t0
+        t0 = time.time()
+        test_final_preds = np.clip(
+            fusion_model.predict(sent["test"], deepmf_scalar["test"], cbf_scalar["test"]),
+            rating_scale[0], rating_scale[1],
+        )
+        predict_time = time.time() - t0
+        logger.info("KONTROL ATRIBUSI: tree NMF+DT([keyword ABSA + PyABSA-rich, deepmf, cbf]).")
 
     else:
         # Semua varian AGF (Full/Attention-only/Gating-only/leave-one-out/
