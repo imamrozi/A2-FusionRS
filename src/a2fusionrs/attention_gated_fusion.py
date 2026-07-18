@@ -98,13 +98,22 @@ class AspectSequencePooling(nn.Module):
         self.token_proj = nn.Linear(aspect_emb_dim + 4, d)  # emb + [P_neg,P_neu,P_pos,conf]
         self.query = nn.Parameter(torch.randn(1, 1, d) * 0.02)
         self.attn = nn.MultiheadAttention(d, n_heads, dropout=dropout, batch_first=True)
+        # Interpretability (§6.5): kalau capture_attn=True, simpan bobot atensi
+        # query->aspek per baris ke _last_attn. Default False = TANPA overhead
+        # (need_weights=False) pada jalur training/predict normal.
+        self.capture_attn = False
+        self._last_attn: torch.Tensor | None = None
 
     def forward(self, ids: torch.Tensor, feats: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         # ids (B,L) long, feats (B,L,4), mask (B,L) bool True=valid
         emb = self.aspect_emb(ids)                                   # (B,L,emb)
         tokens = self.token_proj(torch.cat([emb, feats], dim=-1))    # (B,L,d)
         q = self.query.expand(tokens.shape[0], -1, -1)               # (B,1,d)
-        pooled, _ = self.attn(q, tokens, tokens, key_padding_mask=~mask)  # (B,1,d)
+        pooled, attn = self.attn(
+            q, tokens, tokens, key_padding_mask=~mask, need_weights=self.capture_attn
+        )  # pooled (B,1,d); attn (B,1,L) kalau capture, else None
+        if self.capture_attn and attn is not None:
+            self._last_attn = attn.squeeze(1).detach()               # (B,L)
         return pooled.squeeze(1)                                     # (B,d)
 
 
@@ -341,6 +350,38 @@ class AttentionGatedFusionTrainer:
         rmse = torch.sqrt(torch.mean((pred - y_tensor) ** 2)).item()
         self.model.train()
         return rmse
+
+    @torch.no_grad()
+    def extract_aspect_attention(
+        self,
+        features: dict[str, np.ndarray],
+        base_norm: np.ndarray | None = None,
+        aspect_seq: dict[str, np.ndarray] | None = None,
+    ) -> np.ndarray:
+        """Interpretability (§6.5, Exp-B/C): bobot atensi query->aspek per baris
+        (N, L) untuk AspectSequencePooling. WAJIB config.aspect_pooling=True.
+        Nyalakan capture_attn hanya selama panggilan ini (tanpa overhead di
+        jalur normal). Baris dgn atensi pada posisi PAD ~0 (key_padding_mask)."""
+        if not self.config.aspect_pooling:
+            raise RuntimeError("extract_aspect_attention butuh config.aspect_pooling=True.")
+        if aspect_seq is None:
+            raise ValueError("aspect_seq wajib untuk ekstraksi atensi aspek.")
+        self.model.eval()
+        pooling = self.model.aspect_pooling
+        pooling.capture_attn = True
+        try:
+            tensors = self._to_tensors(features)
+            base_tensor = (
+                torch.tensor(base_norm, dtype=torch.float32, device=self.config.device)
+                if base_norm is not None else None
+            )
+            self.model(tensors, base=base_tensor, aspect_seq=self._aspect_to_tensors(aspect_seq))
+            attn = pooling._last_attn.cpu().numpy()  # (N, L)
+        finally:
+            pooling.capture_attn = False
+            pooling._last_attn = None
+        self.model.train()
+        return attn
 
     @torch.no_grad()
     def predict(

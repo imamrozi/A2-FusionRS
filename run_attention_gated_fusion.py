@@ -360,6 +360,87 @@ def _compute_pyabsa_aspect_sequences(
     return vocab, seqs
 
 
+def _export_interpretability(
+    agf_trainer, test_features, base_test, aspect_seq_test, aspect_vocab,
+    test_df, test_preds, rating_scale, out_dir, stem,
+) -> None:
+    """§6.5 interpretability: (B) studi kasus atensi per-aspek + (C) uji
+    faithfulness perturbasi (buang aspek paling-diperhatikan vs aspek acak,
+    ukur |Δprediksi|). Base statis tak bergantung aspek, jadi ablasi hanya
+    mengubah KOREKSI AGF -- mengisolasi pengaruh aspek pd refinement (jujur:
+    ini menjelaskan koreksi di atas base, bukan seluruh prediksi)."""
+    ids = aspect_seq_test["ids"]                 # (N, L)
+    feats = aspect_seq_test["feats"]             # (N, L, 4) = [P_neg,P_neu,P_pos,conf]
+    mask = np.asarray(aspect_seq_test["mask"]).astype(bool)  # (N, L)
+    attn = agf_trainer.extract_aspect_attention(test_features, base_test, aspect_seq_test)  # (N, L)
+    id2term = {v: k for k, v in aspect_vocab.items()}  # id 0=PAD, 1=UNK
+    N = ids.shape[0]
+    n_valid = mask.sum(axis=1)
+
+    # ----- (B) tabel studi kasus (semua baris; filter analisis di skrip lain) -----
+    rows = []
+    for i in range(N):
+        valid = np.where(mask[i])[0]
+        terms = [id2term.get(int(ids[i, j]), "<UNK>") for j in valid]
+        rows.append({
+            "review_id": test_df["review_id"].values[i],
+            "n_aspects": int(n_valid[i]),
+            "pred": round(float(test_preds[i]), 4),
+            "actual": float(test_df["stars"].values[i]),
+            "aspects": "|".join(terms),
+            "attn": "|".join(f"{a:.3f}" for a in attn[i, valid]),
+            "p_pos": "|".join(f"{p:.2f}" for p in feats[i, valid, 2]),
+            "p_neg": "|".join(f"{p:.2f}" for p in feats[i, valid, 0]),
+        })
+    case_path = out_dir / f"interp_cases_{stem}.csv"
+    pd.DataFrame(rows).to_csv(case_path, index=False)
+    logger.info("§6.5 Exp-B: studi kasus atensi aspek disimpan ke %s (%d baris).", case_path, N)
+
+    # ----- (C) faithfulness: ablasi top-atensi vs acak (baris >=2 aspek) -----
+    multi = np.where(n_valid >= 2)[0]
+    if len(multi) == 0:
+        logger.warning("§6.5 Exp-C dilewati: tak ada baris dgn >=2 aspek valid.")
+        return
+    attn_masked = np.where(mask, attn, -np.inf)
+    top_idx = attn_masked.argmax(axis=1)
+    rng = np.random.default_rng(0)
+    mask_top, mask_rand = mask.copy(), mask.copy()
+    for i in multi:
+        mask_top[i, top_idx[i]] = False
+        valid = np.where(mask[i])[0]
+        r = rng.choice(valid[valid != top_idx[i]])
+        mask_rand[i, r] = False
+
+    def _pred(mask_variant):
+        aseq = {"ids": ids, "feats": feats, "mask": mask_variant}
+        p, _ = agf_trainer.predict(test_features, rating_scale, base_norm=base_test, aspect_seq=aseq)
+        return np.clip(p, rating_scale[0], rating_scale[1])
+
+    delta_top = np.abs(_pred(mask_top) - test_preds)[multi]
+    delta_rand = np.abs(_pred(mask_rand) - test_preds)[multi]
+    frac_bigger = float((delta_top > delta_rand).mean())
+    from scipy.stats import wilcoxon
+    try:
+        _, p_val = wilcoxon(delta_top, delta_rand)
+    except ValueError:
+        p_val = float("nan")
+    summary = {
+        "n_rows_ge2_aspects": int(len(multi)),
+        "mean_delta_top_attended": round(float(delta_top.mean()), 5),
+        "mean_delta_random": round(float(delta_rand.mean()), 5),
+        "frac_top_gt_random": round(frac_bigger, 4),
+        "wilcoxon_p": p_val,
+    }
+    faith_path = out_dir / f"interp_faithfulness_{stem}.csv"
+    pd.DataFrame([summary]).to_csv(faith_path, index=False)
+    logger.info(
+        "§6.5 Exp-C faithfulness: |Δ|top=%.5f vs acak=%.5f (top>acak di %.1f%% baris, "
+        "Wilcoxon p=%.2e). Disimpan ke %s.",
+        summary["mean_delta_top_attended"], summary["mean_delta_random"],
+        frac_bigger * 100, p_val, faith_path,
+    )
+
+
 def run_pipeline(
     config: dict,
     scenario: str,
@@ -369,6 +450,7 @@ def run_pipeline(
     residual_base: str = "none",
     extra_pyabsa: str = "none",
     run_tag: str = "",
+    export_interpretability: bool = False,
 ) -> None:
     """`input_standardize` & `use_scalar_preds` adalah 2 DIAGNOSTIK Stage 7
     (default False = perilaku ASLI 150-run, byte-identical). Keduanya HANYA
@@ -851,6 +933,18 @@ def run_pipeline(
         gate_df.to_csv(gate_path, index=False)
         logger.info("Bobot gate per-baris disimpan ke %s.", gate_path)
 
+    # §6.5 interpretability (Exp-B/C) -- HANYA perseq (AspectSequencePooling aktif).
+    if export_interpretability:
+        if extra_pyabsa != "perseq":
+            logger.warning("--export-interpretability diabaikan: hanya berlaku utk --extra-pyabsa perseq.")
+        else:
+            _export_interpretability(
+                agf_trainer, build_features("test"),
+                base_norm["test"] if base_norm else None,
+                aspect_seq["test"], aspect_vocab, test_df, test_final_preds,
+                rating_scale, results_dir, results_path.stem,
+            )
+
     logger.info("Pipeline AGF SELESAI. RMSE=%.4f (skenario '%s', domain '%s').", rmse, scenario, exp_cfg["domain"])
 
 
@@ -893,6 +987,11 @@ if __name__ == "__main__":
         "--run-tag", type=str, default="",
         help="Suffix nama file hasil supaya run diagnostik tidak menimpa hasil utama 150-run (mis. 'norm').",
     )
+    parser.add_argument(
+        "--export-interpretability", action="store_true",
+        help="§6.5: ekspor atensi per-aspek (studi kasus) + uji faithfulness perturbasi. "
+        "HANYA berlaku utk --extra-pyabsa perseq (AspectSequencePooling).",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -908,4 +1007,5 @@ if __name__ == "__main__":
         residual_base=args.residual_base,
         extra_pyabsa=args.extra_pyabsa,
         run_tag=args.run_tag,
+        export_interpretability=args.export_interpretability,
     )
