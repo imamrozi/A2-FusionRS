@@ -84,7 +84,8 @@ def exp_a_gate_weights(results_dir: Path) -> pd.DataFrame:
     return table
 
 
-def exp_b_case_studies(results_dir: Path, domain: str, seed: int = 42, top_n: int = 6) -> None:
+def exp_b_case_studies(results_dir: Path, domain: str, seed: int = 42, top_n: int = 6,
+                       out_dir: Path | None = None) -> pd.DataFrame | None:
     """Pilih contoh ILUSTRATIF yg BERSIH & JUJUR utk tabel manuskrip: aspek
     top-atensi harus BERNAMA (bukan <UNK>), atensi terkonsentrasi, dan sentimen
     aspek-top SEARAH prediksi (koheren). Ini ilustrasi tipikal -- bukti rigor
@@ -121,12 +122,17 @@ def exp_b_case_studies(results_dir: Path, domain: str, seed: int = 42, top_n: in
         })
     if not records:
         logger.warning("Exp-B %s: tak ada kasus koheren+bernama (semua top-atensi UNK/tak koheren).", domain)
-        return
+        return None
     out = pd.DataFrame(records).sort_values("top_attn", ascending=False).head(top_n)
     logger.info(
         "\n=== Exp-B: %s (seed %d) -- %d studi kasus BERSIH (aspek bernama + koheren) ===\n%s",
         domain, seed, len(out), out.to_string(index=False),
     )
+    if out_dir is not None:
+        path = out_dir / f"interp_expB_cases_selected_{domain}_seed{seed}.csv"
+        out.to_csv(path, index=False)
+        logger.info("Exp-B %s: studi kasus terpilih disimpan ke %s.", domain, path)
+    return out
 
 
 def exp_c_faithfulness(results_dir: Path) -> pd.DataFrame:
@@ -160,13 +166,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Analisis interpretability A2-FusionRS (§6.5)")
     parser.add_argument("--results-dir", type=str, default="checkpoints/results")
     parser.add_argument("--seed", type=int, default=42, help="Seed utk studi kasus Exp-B.")
+    parser.add_argument(
+        "--out-dir", type=str, default=None,
+        help="Direktori simpan tabel agregat analisis (default: sama dgn --results-dir).",
+    )
     args = parser.parse_args()
     results_dir = Path(args.results_dir)
+    out_dir = Path(args.out_dir) if args.out_dir else results_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    exp_a_gate_weights(results_dir)
+    table_a = exp_a_gate_weights(results_dir)
+    if not table_a.empty:
+        table_a.to_csv(out_dir / "interp_expA_gate_summary.csv", index=False)
     for domain in DOMAINS:
-        exp_b_case_studies(results_dir, domain, seed=args.seed)
-    exp_c_faithfulness(results_dir)
+        exp_b_case_studies(results_dir, domain, seed=args.seed, out_dir=out_dir)
+    table_c = exp_c_faithfulness(results_dir)
+    if not table_c.empty:
+        table_c.to_csv(out_dir / "interp_expC_faithfulness_summary.csv", index=False)
+    logger.info("Semua tabel agregat interpretability disimpan ke %s.", out_dir)
 
 
 if __name__ == "__main__":
