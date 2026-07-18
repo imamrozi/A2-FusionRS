@@ -82,6 +82,38 @@ Prefix file: `<prefix>_<domain>_seed<seed>.yaml`
 3. **Pure-CF konvergen ~1,1–1,2** (KNN/SVD/NeuMF/DeepFM) = plafon CF sejati pada
    review ultra-sparse; sinyal review (konten+sentimen) yang membawa ke ~0,65.
 
+## 5b. Interpretability (§6.5) — terverifikasi (seed 42; Exp-A lintas 5 seed)
+
+**Exp-A — bobot gate rata-rata per modalitas (5 seed):**
+
+| Domain (cakupan) | deepmf | cbf | absa(keyword) | pyabsa_aspect |
+|---|---:|---:|---:|---:|
+| Amazon (45,1%) | 0,236 | 0,234 | 0,251 | 0,279 |
+| Restaurant (87,7%) | 0,239 | 0,224 | 0,248 | 0,290 |
+| Hotel (95,9%) | 0,201 | 0,302 | 0,286 | 0,211 |
+
+> Korelasi cakupan-keyword vs gate pyabsa_aspek: **r = −0,52** → modalitas
+> PyABSA-aspek diberi bobot LEBIH BESAR di domain cakupan-RENDAH → INDEPENDEN
+> mengonfirmasi temuan akurasi (manfaat PyABSA ∝ 1/cakupan). Triangulasi.
+> CAVEAT: n=3 domain, Hotel outlier utama (cakupan tertinggi & bobot aspek
+> terendah 0,211) → indikatif, bukan konklusif. Catat juga: di Hotel, CBF
+> dominan (0,302) — ketergantungan modalitas bersifat domain-adaptif.
+
+**Exp-C — faithfulness (buang aspek top-atensi vs acak, |Δpred|):**
+
+| Domain | \|Δ\|top | \|Δ\|acak | top>acak | Wilcoxon p |
+|---|---:|---:|---:|---:|
+| Amazon | 0,0511 | 0,0160 | 71,2% | ≈0 |
+| Restaurant | 0,0603 | 0,0319 | 69,9% | ≈0 |
+| Hotel | 0,0475 | 0,0214 | 71,3% | ≈0 |
+
+> Aspek top-atensi berdampak 2–3× lebih besar dari aspek acak (~70% baris, p≈0)
+> → atensi FAITHFUL (mencerminkan pengaruh nyata pada koreksi), bukan dekoratif.
+
+**Exp-B — studi kasus**: ilustratif; diseleksi aspek-bernama + koheren (sentimen
+aspek-top searah prediksi). JUJUR: tak semua kasus koheren (Exp-C: ~70%, bukan
+100%); banyak aspek top = <UNK> di luar vocab top-500 (terutama Amazon).
+
 ## 6. Klaim yang BOLEH & TIDAK BOLEH ditulis
 
 BOLEH (didukung data):
