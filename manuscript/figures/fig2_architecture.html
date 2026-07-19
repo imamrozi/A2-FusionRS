@@ -1,0 +1,280 @@
+<title>Fig. 2 — A2-FusionRS Architecture</title>
+<style>
+  :root {
+    --bg:#F7F9FB; --panel:#FFFFFF; --ink:#1B2530; --muted:#5C6B7A;
+    --line:#C4D0DB; --band:#EDF1F5; --band2:#F4F7F9;
+    --deepmf:#3E6DA6; --cbf:#2C8A78; --absa:#BE7A2E; --fusion:#5A54B0; --output:#B04A63;
+    --sans: system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono: "SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0F151A; --panel:#18212B; --ink:#DDE7EF; --muted:#8497A8;
+      --line:#2E3D49; --band:#141D25; --band2:#111921;
+      --deepmf:#6F9BD1; --cbf:#4FB6A0; --absa:#E0A252; --fusion:#9089DA; --output:#DA7E93;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg:#F7F9FB; --panel:#FFFFFF; --ink:#1B2530; --muted:#5C6B7A;
+    --line:#C4D0DB; --band:#EDF1F5; --band2:#F4F7F9;
+    --deepmf:#3E6DA6; --cbf:#2C8A78; --absa:#BE7A2E; --fusion:#5A54B0; --output:#B04A63;
+  }
+  :root[data-theme="dark"] {
+    --bg:#0F151A; --panel:#18212B; --ink:#DDE7EF; --muted:#8497A8;
+    --line:#2E3D49; --band:#141D25; --band2:#111921;
+    --deepmf:#6F9BD1; --cbf:#4FB6A0; --absa:#E0A252; --fusion:#9089DA; --output:#DA7E93;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
+    line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; padding:32px 22px 48px; }
+  .fig-head { margin-bottom:20px; }
+  .fig-eyebrow { font-size:12px; letter-spacing:.14em; text-transform:uppercase;
+    color:var(--fusion); font-weight:600; margin-bottom:6px; }
+  h1 { font-size:22px; line-height:1.25; margin:0 0 8px; font-weight:650; text-wrap:balance; }
+  .fig-lede { color:var(--muted); font-size:14.5px; max-width:66ch; margin:0; }
+
+  .legend { display:flex; flex-wrap:wrap; gap:16px 20px; margin:18px 0 8px;
+    padding:12px 14px; background:var(--band2); border:1px solid var(--line);
+    border-radius:10px; font-size:12.5px; }
+  .legend b { font-weight:600; }
+  .lg { display:inline-flex; align-items:center; gap:7px; color:var(--muted); }
+  .swatch { width:13px; height:13px; border-radius:3px; flex:none; }
+  .lg-line { width:22px; height:0; flex:none; border-top:2px solid var(--line); }
+  .lg-line.tap { border-top:2px dashed var(--output); }
+  .lg-line.base { border-top:2px dashed var(--muted); }
+
+  .scroll { overflow-x:auto; padding-bottom:6px; }
+  .diagram { position:relative; min-width:960px; padding:8px 4px 4px; }
+  svg.conn { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
+  .flow { display:grid; grid-template-columns:1.05fr 1.15fr 1fr 1.15fr 1fr .78fr;
+    gap:26px; position:relative; z-index:2; align-items:stretch; }
+  .stage { display:flex; flex-direction:column; }
+  .eyebrow { font-size:10.5px; letter-spacing:.11em; text-transform:uppercase;
+    color:var(--muted); font-weight:600; margin:0 0 12px; text-align:center; min-height:26px; }
+  .col { display:flex; flex-direction:column; gap:16px; justify-content:center; flex:1; }
+
+  .node { background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--nc,var(--line));
+    border-radius:9px; padding:9px 11px; box-shadow:0 1px 2px rgba(20,40,60,.05); }
+  .node .t { font-size:13.5px; font-weight:620; letter-spacing:-.01em; }
+  .node .s { font-size:11px; color:var(--muted); margin-top:2px; }
+  .node .m { font-family:var(--mono); font-size:10.5px; color:var(--muted); margin-top:4px; letter-spacing:-.02em; }
+  .node.io { --nc:var(--muted); text-align:left; }
+  .node.deepmf { --nc:var(--deepmf); } .node.cbf { --nc:var(--cbf); }
+  .node.absa { --nc:var(--absa); }
+  .node.fusion { --nc:var(--fusion); background:color-mix(in srgb,var(--fusion) 7%,var(--panel)); }
+  .node.out { --nc:var(--output); background:color-mix(in srgb,var(--output) 9%,var(--panel)); text-align:center; }
+  .node.sum { --nc:var(--output); text-align:center; font-family:var(--mono); }
+  .node.sum .big { font-size:20px; font-weight:700; color:var(--output); line-height:1; }
+
+  .baselane { position:relative; z-index:2; margin-top:22px; }
+  .baselane .eyebrow { text-align:left; margin-bottom:8px; }
+  .node.base { --nc:var(--muted); background:repeating-linear-gradient(135deg,
+      var(--band2), var(--band2) 9px, var(--band) 9px, var(--band) 18px);
+    max-width:560px; }
+
+  .tap { font-family:var(--mono); font-size:10.5px; color:var(--output);
+    border:1px dashed var(--output); border-radius:7px; padding:5px 8px;
+    background:color-mix(in srgb,var(--output) 6%,var(--panel)); }
+  .taps { display:flex; gap:14px; flex-wrap:wrap; margin-top:20px; position:relative; z-index:2; }
+
+  figcaption { margin-top:26px; font-size:13px; color:var(--muted); max-width:80ch;
+    border-top:1px solid var(--line); padding-top:14px; }
+  figcaption b { color:var(--ink); font-weight:600; }
+  .cap-eq { font-family:var(--mono); font-size:12px; color:var(--ink);
+    background:var(--band2); border:1px solid var(--line); border-radius:7px;
+    padding:8px 11px; margin:10px 0; display:inline-block; }
+</style>
+
+<div class="wrap">
+  <figure style="margin:0;">
+    <div class="fig-head">
+      <div class="fig-eyebrow">Figure 2 · Proposed method</div>
+      <h1>A2-FusionRS: attention-gated fusion of collaborative, content, and per-aspect sentiment signals</h1>
+      <p class="fig-lede">Four modality tokens are contextualized by multi-head cross-attention and combined
+        through a gated pooling layer; the resulting vector produces an additive correction over a static
+        fusion base (residual formulation). Dashed rose paths mark the two interpretability signals analyzed
+        in Section&nbsp;6.5.</p>
+    </div>
+
+    <div class="legend" aria-label="Legend">
+      <span class="lg"><span class="swatch" style="background:var(--deepmf)"></span>DeepMF (collaborative)</span>
+      <span class="lg"><span class="swatch" style="background:var(--cbf)"></span>CBF (content)</span>
+      <span class="lg"><span class="swatch" style="background:var(--absa)"></span>ABSA (aspect sentiment)</span>
+      <span class="lg"><span class="swatch" style="background:var(--fusion)"></span>Fusion core</span>
+      <span class="lg"><span class="lg-line"></span>data flow</span>
+      <span class="lg"><span class="lg-line base"></span>static-base input</span>
+      <span class="lg"><span class="lg-line tap"></span>interpretability tap (§6.5)</span>
+    </div>
+
+    <div class="scroll">
+      <div class="diagram" id="diagram">
+        <svg class="conn" id="conn" aria-hidden="true">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"></path>
+            </marker>
+            <marker id="arrow-tap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--output)"></path>
+            </marker>
+            <marker id="arrow-base" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+            </marker>
+          </defs>
+        </svg>
+
+        <div class="flow">
+          <!-- Stage 1: inputs -->
+          <div class="stage">
+            <div class="eyebrow">Input</div>
+            <div class="col">
+              <div class="node io" id="in-rate"><div class="t">User–Item Ratings</div><div class="m">r_ui ∈ [1,5]</div></div>
+              <div class="node io" id="in-rev"><div class="t">Review Text</div><div class="m">d_ui</div></div>
+            </div>
+          </div>
+
+          <!-- Stage 2: encoders -->
+          <div class="stage">
+            <div class="eyebrow">Modality encoders</div>
+            <div class="col">
+              <div class="node deepmf" id="e-mf"><div class="t">DeepMF</div><div class="s">collaborative filtering</div><div class="m">→ scalar r̂_MF</div></div>
+              <div class="node cbf" id="e-cbf"><div class="t">CBF</div><div class="s">item PCA + user cluster</div><div class="m">→ scalar r̂_CBF</div></div>
+              <div class="node absa" id="e-kw"><div class="t">Keyword-ABSA</div><div class="s">fixed taxonomy</div><div class="m">concat + confidence</div></div>
+              <div class="node absa" id="e-py"><div class="t">PyABSA</div><div class="s">model-based, open-vocab</div><div class="m">{(aⱼ, P_neg,P_neu,P_pos,c)}</div></div>
+            </div>
+          </div>
+
+          <!-- Stage 3: tokens -->
+          <div class="stage">
+            <div class="eyebrow">Modality tokens (d = 64)</div>
+            <div class="col">
+              <div class="node deepmf" id="t-mf"><div class="t">Linear proj</div><div class="m">r̂_MF → ℝ⁶⁴</div></div>
+              <div class="node cbf" id="t-cbf"><div class="t">Linear proj</div><div class="m">r̂_CBF → ℝ⁶⁴</div></div>
+              <div class="node absa" id="t-kw"><div class="t">Linear proj</div><div class="m">v_kw → ℝ⁶⁴</div></div>
+              <div class="node absa" id="t-asp"><div class="t">Aspect-Sequence Pooling</div><div class="s">learned aspect identity + masked query-attention</div><div class="m">seq → ℝ⁶⁴</div></div>
+            </div>
+          </div>
+
+          <!-- Stage 4: fusion -->
+          <div class="stage">
+            <div class="eyebrow">Attention-gated fusion</div>
+            <div class="col">
+              <div class="node fusion" id="f-attn"><div class="t">Multi-Head Cross-Attention</div><div class="s">over 4 tokens + residual, LayerNorm</div></div>
+              <div class="node fusion" id="f-gate"><div class="t">Gated Pooling</div><div class="s">softmax gate α per modality</div><div class="m">fused = Σ αₖ·tokenₖ</div></div>
+            </div>
+          </div>
+
+          <!-- Stage 5: head -->
+          <div class="stage">
+            <div class="eyebrow">Correction</div>
+            <div class="col">
+              <div class="node fusion" id="head"><div class="t">Prediction Head</div><div class="s">MLP</div><div class="m">→ Δ (residual)</div></div>
+            </div>
+          </div>
+
+          <!-- Stage 6: combine + output -->
+          <div class="stage">
+            <div class="eyebrow">Output</div>
+            <div class="col">
+              <div class="node sum" id="sum"><div class="big">⊕</div><div class="m">r̂_base + Δ</div></div>
+              <div class="node out" id="out"><div class="t">Predicted rating r̂</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Static base lane -->
+        <div class="baselane">
+          <div class="eyebrow">Static fusion base (residual anchor)</div>
+          <div class="node base" id="base">
+            <div class="t">A2-IRM base — NMF + Decision Tree</div>
+            <div class="s">static fusion over r̂_MF, r̂_CBF, keyword-ABSA · 5-fold out-of-fold to prevent leakage</div>
+            <div class="m">→ r̂_base</div>
+          </div>
+        </div>
+
+        <div class="taps">
+          <div class="tap" id="tap-gate">§6.5 · gate weights α → per-modality attribution (Exp-A)</div>
+          <div class="tap" id="tap-attn">§6.5 · aspect attention → case studies + faithfulness (Exp-B/C)</div>
+        </div>
+      </div>
+    </div>
+
+    <figcaption>
+      <b>A2-FusionRS end-to-end.</b> Collaborative (DeepMF) and content (CBF) streams contribute their
+      calibrated scalar rating predictions, whereas the sentiment stream is kept as a rich representation:
+      fixed-taxonomy keyword-ABSA as a confidence-weighted vector, and open-vocabulary PyABSA as a
+      variable-length per-aspect sequence pooled by a learned masked query-attention. The four projected
+      tokens are contextualized by multi-head cross-attention and merged by a softmax gate; a small MLP head
+      emits an additive correction on top of the static A2-IRM base, giving the residual prediction
+      <span class="cap-eq">r̂ = r̂_base + Δ,&nbsp;&nbsp;Δ = Head(Σₖ αₖ · tokenₖ)</span>
+      The gate weights α and the aspect-level attention are exported for the interpretability analysis
+      (Section&nbsp;6.5); the latter is validated by a perturbation faithfulness test. Ratings are modeled on
+      the normalized scale and mapped back to [1,5] for evaluation.
+    </figcaption>
+  </figure>
+</div>
+
+<script>
+  const EDGES = [
+    // inputs -> encoders
+    ["in-rate","e-mf","r","l","flow"], ["in-rate","e-cbf","r","l","flow"],
+    ["in-rev","e-cbf","r","l","flow"], ["in-rev","e-kw","r","l","flow"], ["in-rev","e-py","r","l","flow"],
+    // encoders -> tokens
+    ["e-mf","t-mf","r","l","flow"], ["e-cbf","t-cbf","r","l","flow"],
+    ["e-kw","t-kw","r","l","flow"], ["e-py","t-asp","r","l","flow"],
+    // tokens -> attention
+    ["t-mf","f-attn","r","l","flow"], ["t-cbf","f-attn","r","l","flow"],
+    ["t-kw","f-attn","r","l","flow"], ["t-asp","f-attn","r","l","flow"],
+    // fusion chain
+    ["f-attn","f-gate","t","b","flow"], ["f-gate","head","r","l","flow"],
+    ["head","sum","r","l","flow"], ["sum","out","t","b","flow"],
+    // base lane
+    ["e-mf","base","b","t","base"], ["e-cbf","base","b","t","base"], ["e-kw","base","b","t","base"],
+    ["base","sum","r","b","base"],
+    // interpretability taps
+    ["f-gate","tap-gate","b","t","tap"], ["t-asp","tap-attn","b","t","tap"],
+  ];
+  const conn = document.getElementById("conn");
+  const diagram = document.getElementById("diagram");
+  const NS = "http://www.w3.org/2000/svg";
+
+  function anchor(el, side, box) {
+    const r = el.getBoundingClientRect();
+    const x = r.left - box.left, y = r.top - box.top;
+    switch (side) {
+      case "r": return [x + r.width, y + r.height/2, 1, 0];
+      case "l": return [x, y + r.height/2, -1, 0];
+      case "t": return [x + r.width/2, y, 0, -1];
+      case "b": return [x + r.width/2, y + r.height, 0, 1];
+    }
+  }
+  function draw() {
+    [...conn.querySelectorAll("path.edge")].forEach(p => p.remove());
+    const box = diagram.getBoundingClientRect();
+    conn.setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+    for (const [from, to, fs, ts, kind] of EDGES) {
+      const a = document.getElementById(from), b = document.getElementById(to);
+      if (!a || !b) continue;
+      const [x1,y1,nx1,ny1] = anchor(a, fs, box);
+      const [x2,y2,nx2,ny2] = anchor(b, ts, box);
+      const d = Math.max(38, Math.hypot(x2-x1, y2-y1) * 0.42);
+      const c1x = x1 + nx1*d, c1y = y1 + ny1*d;
+      const c2x = x2 + nx2*d, c2y = y2 + ny2*d;
+      const path = document.createElementNS(NS, "path");
+      path.setAttribute("class", "edge");
+      path.setAttribute("d", `M${x1},${y1} C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`);
+      path.setAttribute("fill", "none");
+      const stroke = kind === "tap" ? "var(--output)" : kind === "base" ? "var(--muted)" : "var(--line)";
+      path.setAttribute("stroke", stroke);
+      path.setAttribute("stroke-width", kind === "flow" ? "1.8" : "1.4");
+      if (kind !== "flow") path.setAttribute("stroke-dasharray", "5 4");
+      path.setAttribute("marker-end", kind === "tap" ? "url(#arrow-tap)" : kind === "base" ? "url(#arrow-base)" : "url(#arrow)");
+      conn.appendChild(path);
+    }
+  }
+  const ro = new ResizeObserver(draw);
+  ro.observe(diagram);
+  window.addEventListener("load", draw);
+  window.addEventListener("resize", draw);
+  draw();
+</script>
