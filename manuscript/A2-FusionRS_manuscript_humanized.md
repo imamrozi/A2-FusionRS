@@ -1020,6 +1020,8 @@ Zhang, C., Xue, S., Li, J., Wu, J., Du, B., Liu, D., Chang, J., 2023. Multi-aspe
 
 ## Figure Captions
 
+![Fig. 1](figures/fig1_architecture.png)
+
 **Fig. 1.** Overall architecture of the proposed A2-FusionRS. The collaborative (DeepMF) and
 content (CBF) streams contribute calibrated scalar predictions, whereas the sentiment stream
 is kept rich: keyword-ABSA as a confidence-weighted vector and open-vocabulary PyABSA as a
@@ -1029,11 +1031,15 @@ softmax gate; a small head emits an additive correction over the static A2-IRM b
 fused from the DeepMF, CBF, and keyword-ABSA signals — giving the residual prediction
 $\hat r = \hat r^{\mathrm{base}} + \Delta$, $\Delta = \mathrm{Head}(\sum_k \alpha_k\,\mathrm{token}_k)$.
 
+![Fig. 2](figures/fig2_rmse_by_model.png)
+
 **Fig. 2.** RMSE by model and domain (mean over five seeds). The four rating-only
 collaborative methods cluster near RMSE ≈ 1.1 — barely below the per-domain Global Mean and,
 for Item-KNN, at it — whereas the review-aware hybrids A2-IRM and A2-FusionRS drop to ≈ 0.65.
 A2-FusionRS is lowest in every domain. Global-Mean bars are hatched to mark the
 constant-predictor reference.
+
+![Fig. 3](figures/fig3_coverage_dependence.png)
 
 **Fig. 3.** Coverage-dependence of the model-based-ABSA benefit. Each point is one domain; the
 RMSE reduction from the open-vocabulary encoder is largest where the fixed-taxonomy keyword
@@ -1041,6 +1047,8 @@ encoder covers the fewest reviews (Amazon, 45.1%) and smallest where coverage sa
 (Hotel, 95.9%), declining monotonically. The same ordering appears independently in the
 learned gate weights (Section 6.5), where the aspect modality's weight also falls as coverage
 rises ($r=-0.52$).
+
+![Fig. 4](figures/fig4_interpretability.png)
 
 **Fig. 4.** Interpretability of A2-FusionRS. **(a)** A perturbation test: removing the single
 most-attended aspect from each review changes the prediction two-to-three times more than
