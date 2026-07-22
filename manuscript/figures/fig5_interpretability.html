@@ -1,0 +1,146 @@
+<title>Fig. 5 — A2-FusionRS Interpretability</title>
+<style>
+  :root{
+    --page:#EEF1F4; --paper:#FFFFFF; --ink:#14181C; --muted:#5A6675; --faint:#8A97A5;
+    --grid:#E7EAEF; --line:#CBD4DD;
+    --accent:#2A78D6; --random:#9AA6B2;
+    --m1:#C6CDD6; --m2:#98A4B0; --m3:#5E6B77; /* deepmf, cbf, keyword-absa (neutral ramp) */
+    --sans: system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SFMono-Regular",ui-monospace,"JetBrains Mono",Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme: dark){ :root{ --page:#0F151A; } }
+  :root[data-theme="dark"]{ --page:#0F151A; }
+  :root[data-theme="light"]{ --page:#EEF1F4; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--page); font-family:var(--sans); -webkit-font-smoothing:antialiased; }
+  .wrap{ max-width:900px; margin:0 auto; padding:28px 20px 44px; }
+  .paper{ background:var(--paper); color:var(--ink); border:1px solid #D8DEE5; border-radius:6px;
+    padding:22px 22px 16px; box-shadow:0 2px 14px rgba(20,40,60,.10); }
+  .eyebrow{ font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); font-weight:700; }
+  h2{ font-size:16px; margin:3px 0 14px; font-weight:640; letter-spacing:-.01em; }
+  .panels{ display:flex; gap:20px; flex-wrap:wrap; }
+  .panel{ flex:1 1 360px; min-width:300px; }
+  .pt{ font-size:12.5px; font-weight:640; margin:0 0 2px; }
+  .pt b{ color:var(--accent); }
+  .ps{ font-size:11.5px; color:var(--muted); margin:0 0 8px; }
+  .scroll{ overflow-x:auto; }
+  svg{ display:block; width:100%; height:auto; font-family:var(--sans); }
+  .legend{ display:flex; gap:14px; flex-wrap:wrap; font-size:11.5px; color:var(--muted); margin:6px 0 2px; }
+  .lg{ display:inline-flex; align-items:center; gap:6px; }
+  .sw{ width:12px; height:12px; border-radius:3px; }
+  .axnum{ fill:var(--muted); font-size:10px; font-family:var(--mono); }
+  .glab{ fill:var(--ink); font-size:11px; }
+  .dlab{ fill:var(--ink); font-size:9.5px; font-family:var(--mono); font-weight:600; }
+  .gridline{ stroke:var(--grid); stroke-width:1; }
+  .axis{ stroke:var(--line); stroke-width:1.2; }
+  .ax{ fill:var(--muted); font-size:10.5px; }
+  figcaption{ font-size:12px; color:var(--muted); line-height:1.55; margin-top:14px; border-top:1px solid var(--grid); padding-top:10px; }
+  figcaption b{ color:var(--ink); font-weight:700; }
+  .tip{ position:fixed; pointer-events:none; background:#14181C; color:#fff; font-size:11px; font-family:var(--mono);
+    padding:5px 8px; border-radius:5px; opacity:0; transition:opacity .1s; z-index:10; white-space:nowrap; }
+  @media print{ body{ background:#fff; } .paper{ box-shadow:none; border:none; } }
+</style>
+
+<div class="tip" id="tip"></div>
+<div class="wrap">
+  <div class="paper">
+    <div class="eyebrow">Figure 5 · Interpretability</div>
+    <h2>The fusion is interpretable, and its aspect attention is faithful — not merely displayed</h2>
+
+    <div class="panels">
+      <div class="panel">
+        <p class="pt">(a) Attention faithfulness</p>
+        <p class="ps">Change in prediction when the <b>top-attended</b> aspect is removed vs. a random aspect.</p>
+        <div class="legend" id="legA"></div>
+        <div class="scroll"><svg id="figA" viewBox="0 0 420 300" role="img" aria-label="Faithfulness perturbation"></svg></div>
+      </div>
+      <div class="panel">
+        <p class="pt">(b) Per-modality gate weights</p>
+        <p class="ps">Learned softmax gate (sums to 1). The <b>aspect</b> modality's share falls as keyword coverage rises.</p>
+        <div class="legend" id="legB"></div>
+        <div class="scroll"><svg id="figB" viewBox="0 0 420 300" role="img" aria-label="Gate weights by modality"></svg></div>
+      </div>
+    </div>
+
+    <figcaption><b>Fig. 5.</b> Interpretability of A2-FusionRS. <b>(a)</b> A perturbation test: removing the
+      single most-attended aspect from each review changes the prediction two-to-three times more than removing
+      a random aspect (|Δ| 0.051 vs. 0.016 on Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel;
+      the top-attended aspect has the larger effect in ≈ 70% of reviews, p ≈ 0 in all domains). The attention is
+      therefore faithful in the aggregate rather than decorative. <b>(b)</b> The learned gate distributes weight
+      across the four modalities; the model-based aspect modality (blue) receives its highest weight in the
+      lowest-coverage domain (Amazon) and its lowest in the highest-coverage domain (Hotel), independently
+      echoing the accuracy trend of Fig. 4 (r = −0.52 between coverage and aspect-gate weight).</figcaption>
+  </div>
+</div>
+
+<script>
+  const NS="http://www.w3.org/2000/svg";
+  const tip=document.getElementById("tip");
+  const cs=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const COL={accent:cs('--accent'),random:cs('--random'),m1:cs('--m1'),m2:cs('--m2'),m3:cs('--m3')};
+  function el(t,a){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e;}
+  function tipOn(ev,h){tip.innerHTML=h;tip.style.opacity=1;tip.style.left=(ev.clientX+12)+"px";tip.style.top=(ev.clientY-10)+"px";}
+  function tipOff(){tip.style.opacity=0;}
+
+  // ---------- Panel (a): faithfulness grouped bars ----------
+  (function(){
+    const data=[{d:"Amazon",top:0.0511,rand:0.0160},{d:"Restaurant",top:0.0603,rand:0.0319},{d:"Hotel",top:0.0475,rand:0.0214}];
+    const svg=document.getElementById("figA");
+    const W=420,H=300,mL=46,mR=12,mT=14,mB=44,pw=W-mL-mR,ph=H-mT-mB;
+    const yMax=0.07,y=v=>mT+ph-(v/yMax)*ph;
+    for(let g=0;g<=0.0701;g+=0.02){
+      svg.appendChild(el("line",{class:"gridline",x1:mL,y1:y(g),x2:W-mR,y2:y(g)}));
+      svg.appendChild(el("text",{class:"axnum",x:mL-6,y:y(g)+3,"text-anchor":"end"})).textContent=g.toFixed(2);
+    }
+    svg.appendChild(el("line",{class:"axis",x1:mL,y1:mT+ph,x2:W-mR,y2:mT+ph}));
+    svg.appendChild(el("text",{class:"ax",x:13,y:mT+ph/2,"text-anchor":"middle",transform:`rotate(-90 13 ${mT+ph/2})`})).textContent="|Δ prediction|";
+    const gw=pw/data.length, bw=gw*0.28;
+    data.forEach((r,i)=>{
+      const cx=mL+gw*i+gw/2;
+      [["top",COL.accent,-bw-2,"top-attended"],["rand",COL.random,2,"random"]].forEach(([k,c,off,lab])=>{
+        const v=r[k],bx=cx+off,by=y(v),bh=mT+ph-by;
+        const rc=el("rect",{x:bx,y:by,width:bw,height:bh,rx:3,fill:c});
+        rc.addEventListener("mousemove",ev=>tipOn(ev,`${r.d} · ${lab}<br>|Δ| ${v.toFixed(4)}`));
+        rc.addEventListener("mouseleave",tipOff); svg.appendChild(rc);
+        svg.appendChild(el("text",{class:"dlab",x:bx+bw/2,y:by-3,"text-anchor":"middle",fill:c==COL.accent?COL.accent:"var(--muted)"})).textContent=v.toFixed(3);
+      });
+      svg.appendChild(el("text",{class:"glab",x:cx,y:mT+ph+16,"text-anchor":"middle"})).textContent=r.d;
+    });
+    document.getElementById("legA").innerHTML=
+      `<span class="lg"><span class="sw" style="background:${COL.accent}"></span>removed top-attended</span>`+
+      `<span class="lg"><span class="sw" style="background:${COL.random}"></span>removed random</span>`;
+  })();
+
+  // ---------- Panel (b): 100% stacked gate weights ----------
+  (function(){
+    const data=[{d:"Amazon",cov:"45%",deepmf:.236,cbf:.234,absa:.251,aspect:.279},
+                {d:"Restaurant",cov:"88%",deepmf:.239,cbf:.224,absa:.248,aspect:.290},
+                {d:"Hotel",cov:"96%",deepmf:.201,cbf:.302,absa:.286,aspect:.211}];
+    const segs=[["deepmf",COL.m1,"DeepMF"],["cbf",COL.m2,"CBF"],["absa",COL.m3,"Keyword-ABSA"],["aspect",COL.accent,"PyABSA-aspect"]];
+    const svg=document.getElementById("figB");
+    const W=420,H=300,mL=40,mR=12,mT=14,mB=44,pw=W-mL-mR,ph=H-mT-mB;
+    const y=v=>mT+ph-v*ph;
+    for(let g=0;g<=1.001;g+=0.25){
+      svg.appendChild(el("line",{class:"gridline",x1:mL,y1:y(g),x2:W-mR,y2:y(g)}));
+      svg.appendChild(el("text",{class:"axnum",x:mL-6,y:y(g)+3,"text-anchor":"end"})).textContent=g.toFixed(2);
+    }
+    svg.appendChild(el("line",{class:"axis",x1:mL,y1:mT+ph,x2:W-mR,y2:mT+ph}));
+    svg.appendChild(el("text",{class:"ax",x:12,y:mT+ph/2,"text-anchor":"middle",transform:`rotate(-90 12 ${mT+ph/2})`})).textContent="gate weight";
+    const gw=pw/data.length, bw=gw*0.52;
+    data.forEach((r,i)=>{
+      const cx=mL+gw*i+gw/2, bx=cx-bw/2; let cum=0;
+      segs.forEach(([k,c,lab])=>{
+        const v=r[k], y0=y(cum+v), y1=y(cum), bh=Math.max(0,y1-y0-2); // 2px surface gap
+        const rc=el("rect",{x:bx,y:y0,width:bw,height:bh,rx:2,fill:c});
+        rc.addEventListener("mousemove",ev=>tipOn(ev,`${r.d} · ${lab}<br>gate ${v.toFixed(3)}`));
+        rc.addEventListener("mouseleave",tipOff); svg.appendChild(rc);
+        if(k==="aspect") svg.appendChild(el("text",{class:"dlab",x:cx,y:y0+13,"text-anchor":"middle",fill:"#fff"})).textContent=v.toFixed(3);
+        cum+=v;
+      });
+      svg.appendChild(el("text",{class:"glab",x:cx,y:mT+ph+16,"text-anchor":"middle"})).textContent=r.d;
+      svg.appendChild(el("text",{class:"axnum",x:cx,y:mT+ph+29,"text-anchor":"middle"})).textContent=`kw ${r.cov}`;
+    });
+    document.getElementById("legB").innerHTML=segs.map(([k,c,lab])=>
+      `<span class="lg"><span class="sw" style="background:${c}"></span>${lab}</span>`).join("");
+  })();
+</script>

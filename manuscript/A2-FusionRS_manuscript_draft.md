@@ -656,7 +656,7 @@ rather than merely display.
 
 **Modality contribution.** Averaged over five seeds, the gate places broadly comparable
 weight on the four modalities (each near the 0.25 uniform baseline), with domain-specific
-tilts (Table 7): the aspect modality receives its *lowest* weight in the highest-coverage
+tilts (Table 7, Fig. 5b): the aspect modality receives its *lowest* weight in the highest-coverage
 domain (Hotel, 0.211) and higher weight in the lower-coverage domains (Amazon 0.279,
 Restaurant 0.290), while content features dominate on Hotel (0.302). The correlation
 between keyword coverage and the aspect-modality gate weight is negative ($r=-0.52$). This is an
@@ -671,7 +671,7 @@ drives the prediction — we run a perturbation study: for each test review with
 two aspects, we remove the top-attended aspect and, separately, a randomly chosen aspect,
 and measure the change in prediction. Removing the top-attended aspect changes the
 prediction two-to-three times more than removing a random one (|Δ| of 0.051 vs. 0.016 on
-Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel; Table 8), and the
+Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel; Table 8, Fig. 5a), and the
 top-attended aspect has the larger effect in roughly 70% of reviews ($p\approx 0$ in all
 domains).
 The attention is thus faithful in the aggregate — a stronger claim than an attention
