@@ -75,10 +75,10 @@ with a simple fuser given the same features, has been mis-attributed — and the
 running assumption that more elaborate fusion is the source of gains goes largely
 untested.
 
-This paper studies both gaps in one system. We build on A2-IRM, a static-fusion hybrid
-that combines deep matrix factorization, content-based clustering, and keyword-ABSA
-through a non-negative-matrix-factorization and decision-tree fuser, in the lineage of
-Darraz et al. (2025). We extend it into **A2-FusionRS**, which (i) adds open-vocabulary
+This paper studies both gaps in one system. We build on A2-IRM, our own prior
+static-fusion hybrid that combines deep matrix factorization, content-based clustering,
+and keyword-ABSA through a non-negative-matrix-factorization and decision-tree fuser,
+built in the lineage of Darraz et al. (2025). We extend it into **A2-FusionRS**, which (i) adds open-vocabulary
 model-based ABSA (PyABSA; Yang & Li, 2023) as a complementary modality, summarized by a
 learned *aspect-sequence pooling* layer that preserves aspect identity instead of
 averaging it away, and (ii) fuses the modalities with an attention-gated mechanism whose
@@ -227,7 +227,7 @@ are validated (e.g., faithfulness-tested).
 | Cui et al. (2024), RAKCR | reviews + KG | fixed (aspect) | KG-CNN | no | partial |
 | Yang et al. (2024b), AARN | reviews | fixed (ABSA) | attention | no | yes (attention) |
 | Kim et al. (2024), AXCF | reviews | fixed (ABSA) | graph CF | no | yes (aspect) |
-| Darraz et al. (2025), A2-IRM | reviews | fixed (keyword) | NMF + tree (static) | no | limited |
+| A2-IRM (ours; in the lineage of Darraz et al., 2025) | reviews | fixed (keyword) | NMF + tree (static) | no | limited |
 | **A2-FusionRS (ours)** | reviews | **fixed + open (model-based)** | **attention-gated** | **yes (signal vs. architecture)** | **yes (gate + faithfulness-tested)** |
 
 
@@ -265,10 +265,10 @@ rating scale.
 
 ### 3.2 Modality signals
 
-A2-FusionRS draws on three complementary views of each interaction, reused from the
-A2-IRM baseline — a hybrid of deep matrix factorization, content-based clustering,
-and NMF + decision-tree fusion, the Phase-1 predecessor of this work (Darraz et al.,
-2025) — and extended here:
+A2-FusionRS draws on three complementary views of each interaction, reused from
+A2-IRM — our own prior static-fusion hybrid (deep matrix factorization, content-based
+clustering, and NMF + decision-tree fusion), built in the lineage of Darraz et al.
+(2025) and used here as the Phase-1 predecessor — and extended here:
 
 - **Collaborative (DeepMF).** A deep matrix-factorization model over user/item
   embeddings captures latent collaborative structure and yields a rating estimate
@@ -550,10 +550,11 @@ protocol of Section 5.2:
    collaborative backbone family used by the DeepMF stream inside A2-IRM/A2-FusionRS, so a
    large gap between them and the review-aware models cannot be dismissed as a weak or
    mismatched baseline.
-4. **Hybrid (review-aware)** — *A2-IRM*, the Phase-1 static-fusion hybrid that combines
-   deep matrix factorization, content-based clustering, and keyword-ABSA through an
-   NMF + decision-tree fuser, in the lineage of Darraz et al. (2025). It is the strongest
-   prior model and the direct point of comparison for A2-FusionRS.
+4. **Hybrid (review-aware)** — *A2-IRM*, our own Phase-1 static-fusion hybrid that
+   combines deep matrix factorization, content-based clustering, and keyword-ABSA through
+   an NMF + decision-tree fuser, built in the lineage of Darraz et al. (2025) and
+   reproduced here under the identical protocol of Section 5.2. It is the strongest prior
+   model and the direct point of comparison for A2-FusionRS.
 
 The first three tiers use only the user–item rating signal, whereas A2-IRM and A2-FusionRS
 add the review channel; the contrast across tiers therefore isolates the value of reviews
@@ -580,7 +581,9 @@ embedding of size $d_a=16$, at most eight aspects per review, and a frequency-ra
 aspect vocabulary of the top $V=500$ terms built from the training split only. The model
 is trained with Adam and weight decay, restoring the lowest-validation-RMSE checkpoint.
 The complete hyperparameter list appears in Table 3. All experiments were run on a single
-GPU; code and configurations are released for reproducibility.
+GPU (Google Colab, NVIDIA T4/L4-class), with per-seed timing reported in Table 10. Code,
+configurations, and the exact data splits used for evaluation will be released at the
+repository indicated in the Data Availability statement upon acceptance.
 
 ---
 
@@ -893,6 +896,35 @@ we found none. Stronger review-aware baselines (graph- and LLM-based aspect mode
 Cui et al., 2024; Liu et al., 2025) would sharpen the external comparison. Finally, the
 interpretability account could be extended from faithfulness to usefulness, measuring
 whether the exposed aspect attributions actually help end users judge recommendations.
+
+---
+
+## Declarations
+
+> **[AUTHOR ACTION REQUIRED before submission]** The four statements below are Elsevier /
+> ESWA submission requirements. Placeholders are marked `[[ ]]` and must be completed with
+> author-verified information — none of this content should be inferred or fabricated.
+
+**CRediT authorship contribution statement.** `[[Author Name(s)]]`: Conceptualization,
+Methodology, Software, Validation, Formal analysis, Investigation, Data curation,
+Writing – original draft, Writing – review & editing, Visualization. *(Adjust roles to
+match actual contributions if there is more than one author.)*
+
+**Funding.** `[[This work was supported by <funding body / scheme name>, grant number
+<grant number>.]]` *(If this study was produced under the Universitas Merdeka Malang
+2026 internal research scheme mentioned in project records, insert the exact scheme name
+and grant/contract number here — required by the funder and by ESWA's funding
+acknowledgment policy; do not leave blank if funded work.)*
+
+**Declaration of competing interest.** The authors declare that they have no known
+competing financial interests or personal relationships that could have appeared to
+influence the work reported in this paper.
+
+**Data availability.** The Amazon Electronics, Yelp Open, and TripAdvisor Hotel review
+datasets used in this study are publicly available (see Section 5.1 and the References for
+provenance). Code, configuration files, and the exact train/validation/test splits used
+for evaluation `[[will be made available at <repository URL, e.g., GitHub/Zenodo, to be
+inserted by the author> upon acceptance / are available at <URL> ]]`.
 
 ---
 

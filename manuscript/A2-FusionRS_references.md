@@ -51,6 +51,7 @@
 | zhang2023magnn | Zhang C., et al. Multi-aspect enhanced graph neural networks for recommendation. *Neural Networks*, 157:90–102, 2023. | Neural Networks (Q1) | 10.1016/j.neunet.2022.10.001 |
 | cui2024rakcr | Cui Y., et al. RAKCR: Reviews sentiment-aware knowledge graph convolutional networks. *ESWA*, 248:123403, 2024. | ESWA (Q1) | 10.1016/j.eswa.2024.123403 |
 | lai2021xgb | Lai C.-H., Liu D.-R., Lien K.-S. A hybrid of XGBoost and aspect-based review mining with attention neural network. *Int. J. Machine Learning & Cybernetics*, 12:1203–1217, 2021. | IJMLC (Q1/Q2) | 10.1007/s13042-020-01229-w |
+| lai2023peng | Lai C.-H., Peng P.-Y. A hybrid deep learning method to extract multi-features from reviews and user–item relations for rating prediction. *Int. J. Computational Intelligence Systems*, 16:109, 2023. (from author's SLR set; re-verified via web/DOI lookup 2026-07) | IJCIS (Q2) | 10.1007/s44196-023-00288-5 |
 
 **Sentiment/review-based recommendation & rating-review inconsistency**
 | Key | Citation | Venue | DOI |

@@ -15,12 +15,18 @@
 | Domain | Cakupan keyword-ABSA | Cakupan PyABSA | Rata-rata aspek/review (PyABSA) | Sparsity |
 |---|---:|---:|---:|---:|
 | Amazon Electronics | 45,1% | 80,4% | 1,81 | 99,91% |
-| Restaurant (Yelp) | 87,7% | (dari coverage summary) | (dari coverage summary) | 5-core |
-| TripAdvisor Hotel | 95,9% | 70,2% | 2,77 | — |
+| Restaurant (Yelp) | 87,6% | 78,2% | 2,70 | 99,56% |
+| TripAdvisor Hotel | 95,9% | 70,2% | 2,77 | 99,66% |
 
 > CATATAN: cakupan keyword-ABSA vs PyABSA adalah metrik BERBEDA (keyword =
-> taksonomi tetap; PyABSA = open-vocabulary). Angka Restaurant PyABSA perlu
-> dikutip dari `pyabsa_coverage_summary` di Drive sebelum final.
+> taksonomi tetap; PyABSA = open-vocabulary). **KONFIRMASI (2026-07):** semua
+> angka di atas diverifikasi dari sumber primer —
+> `checkpoints/results/pyabsa_coverage_summary.csv` (PyABSA: n_reviews,
+> pct_with_any_aspect, avg_aspects_per_review; timestamp
+> 2026-07-15T21:33) dan `aspect_coverage.pct_with_any_aspect_match` di YAML
+> `absa_ablation_concat_confidence_*_seed42.yaml` (keyword). Presisi 1 desimal
+> dari nilai asli (Restaurant: 87,64...%→87,6%; 78,17%→78,2%). TIDAK LAGI
+> TODO — angka final, konsisten dgn manuskrip.
 
 ## 2. Tabel utama — RMSE mean±SD (5 seed)
 
@@ -89,7 +95,7 @@ Prefix file: `<prefix>_<domain>_seed<seed>.yaml`
 | Domain (cakupan) | deepmf | cbf | absa(keyword) | pyabsa_aspect |
 |---|---:|---:|---:|---:|
 | Amazon (45,1%) | 0,236 | 0,234 | 0,251 | 0,279 |
-| Restaurant (87,7%) | 0,239 | 0,224 | 0,248 | 0,290 |
+| Restaurant (87,6%) | 0,239 | 0,224 | 0,248 | 0,290 |
 | Hotel (95,9%) | 0,201 | 0,302 | 0,286 | 0,211 |
 
 > Korelasi cakupan-keyword vs gate pyabsa_aspek: **r = −0,52** → modalitas
