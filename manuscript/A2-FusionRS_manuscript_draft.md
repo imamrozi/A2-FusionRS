@@ -214,6 +214,23 @@ architecture, a coverage-dependence analysis that says when the signal helps, an
 faithfulness-tested interpretability account. The result is a system that improves over
 strong baselines *and* an honest account of why.
 
+**Table 1. Positioning of A2-FusionRS relative to representative review-aware recommenders.**
+"Aspect vocabulary" is fixed (keyword/taxonomy) or open (model-based); "Attribution" marks
+whether the accuracy gain is credited to a source through a same-signal control;
+"Interpretability" marks whether attributions are provided and, in parentheses, whether they
+are validated (e.g., faithfulness-tested).
+
+| Method | Review signal | Aspect vocabulary | Fusion | Attribution control | Interpretability |
+|---|---|---|---|:--:|---|
+| Cai et al. (2022), DeepCGSR | reviews + ratings | — (cross-grained sentiment) | deep MF mapping | no | no |
+| Zhang et al. (2023), MA-GNN | reviews | fixed (aspect) | routing GNN | no | partial |
+| Cui et al. (2024), RAKCR | reviews + KG | fixed (aspect) | KG-CNN | no | partial |
+| Yang et al. (2024b), AARN | reviews | fixed (ABSA) | attention | no | yes (attention) |
+| Kim et al. (2024), AXCF | reviews | fixed (ABSA) | graph CF | no | yes (aspect) |
+| Darraz et al. (2025), A2-IRM | reviews | fixed (keyword) | NMF + tree (static) | no | limited |
+| **A2-FusionRS (ours)** | reviews | **fixed + open (model-based)** | **attention-gated** | **yes (signal vs. architecture)** | **yes (gate + faithfulness-tested)** |
+
+
 ---
 
 ## 3. Preliminaries and Problem Formulation
@@ -226,6 +243,16 @@ $r_{ui}\in[1,5]$ and an associated free-text review $d_{ui}$. The observed set i
 $\mathcal{O}=\{(u,i)\mid r_{ui}\ \text{is observed}\}$, which is extremely sparse:
 in the three domains studied here the density $|\mathcal{O}|/(|\mathcal{U}|\,|\mathcal{I}|)$
 falls below $0.1\%$ (Table 2).
+
+**Table 2. Dataset statistics.** Coverage measures: fraction of reviews with ≥1 extracted
+aspect (keyword vs. PyABSA); avg. aspects/review from PyABSA.
+
+| Domain | #Users | #Items | #Interactions | #Test | Sparsity | Keyword coverage | PyABSA coverage | Aspects/review |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Amazon Electronics | 14,749 | 9,226 | 122,062 | 16,580 | 99.91% | 45.1% | 80.4% | 1.81 |
+| Yelp Restaurant | 7,152 | 3,757 | 118,695 | 13,233 | 99.56% | 87.6% | 78.2% | 2.70 |
+| TripAdvisor Hotel | 11,236 | 2,056 | 79,562 | 11,795 | 99.66% | 95.9% | 70.2% | 2.77 |
+
 
 We address **rating prediction**: learn a scoring function
 $f:\mathcal{U}\times\mathcal{I}\rightarrow[1,5]$ that estimates $\hat r_{ui}=f(u,i)$
@@ -427,6 +454,18 @@ mirroring the early-stopping-by-restore policy of the DeepMF stream. Hyperparame
 ($d$, number of heads $H$, aspect-embedding size $d_a$, maximum aspects per review,
 vocabulary size $V$, learning rate, weight decay, epochs) are listed in Table 3.
 
+**Table 3. Key hyperparameters.**
+
+| Component | Setting |
+|---|---|
+| DeepMF | embedding 128; hidden [256,128,64,32]; dropout 0.3; SGD, lr 1e-3; batch 512; 20 epochs; no negative sampling |
+| CBF | item PCA + user cluster preference (components/clusters per config) |
+| Item-KNN | k=40; cosine; item-based |
+| SVD | 100 factors; 20 epochs; lr 5e-3; reg 2e-2 |
+| NeuMF / DeepFM | embedding 64; MLP [128,64,32]; dropout 0.2; Adam, lr 1e-3, weight decay 1e-6; batch 512; 20 epochs |
+| A2-FusionRS (AGF) | d=64; heads H=2; aspect embedding d_a=16; max aspects 8; aspect vocab V=500 (train-only); Adam + weight decay; best-val restore; residual base via 5-fold OOF |
+
+
 ### 4.6 Interpretability signals
 
 A2-FusionRS exposes two complementary attributions at no additional cost. The gate
@@ -564,6 +603,38 @@ metrics (Precision/Recall/NDCG@K) are near-saturated under the restricted-candid
 protocol of Section 5.2 — all models score within a narrow band — so they do not
 discriminate between methods, and we treat RMSE and MAE as the informative metrics.
 
+**Table 4. Overall performance — RMSE and MAE (mean over 5 seeds), lower is better.** Best
+per column in bold. Ranking metrics (Precision/Recall/NDCG@K) are near-saturated under the
+restricted-candidate protocol (Section 5.2) and do not discriminate between models; they
+are omitted here and reported in the supplementary material.
+
+| Model | RMSE Amazon | RMSE Restaurant | RMSE Hotel | MAE Amazon | MAE Restaurant | MAE Hotel |
+|---|---:|---:|---:|---:|---:|---:|
+| Global Mean (reference) | 1.2143 | 1.1516 | 0.9163 | — | — | — |
+| Item-KNN | 1.2240 | 1.2019 | 0.9163 | 0.8311 | 0.9237 | 0.6917 |
+| SVD | 1.1420 | 1.0753 | 0.8953 | 0.8030 | 0.8454 | 0.6954 |
+| NeuMF | 1.1528 | 1.0740 | 0.8399 | 0.7989 | 0.8468 | 0.6632 |
+| DeepFM | 1.1529 | 1.0746 | 0.8393 | 0.8025 | 0.8434 | 0.6619 |
+| A2-IRM (hybrid, prior) | 0.6517 | 0.6791 | 0.6291 | 0.4386 | 0.5505 | 0.5127 |
+| **A2-FusionRS** | **0.6418** | **0.6665** | **0.6196** | **0.4115** | **0.5389** | **0.4996** |
+
+*Per-seed standard deviations (RMSE) are ≤ 0.003 throughout; see Table 6 for ± values on
+the ablation variants.*
+
+
+**Table 5. Significance of A2-FusionRS vs. each baseline** (paired Wilcoxon on per-interaction
+squared error; number of seeds out of 5 with $p<0.05$).
+
+| Comparison | Amazon | Restaurant | Hotel |
+|---|:--:|:--:|:--:|
+| A2-FusionRS vs A2-IRM | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs NeuMF | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs DeepFM | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs SVD | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs Item-KNN | 5/5 | 5/5 | 5/5 |
+| (attribution) static tree + PyABSA vs A2-IRM | 5/5 | 5/5 | 5/5 |
+
+
 The more instructive result is the *structure* of the baseline column, which Fig. 2 makes
 visual. The four pure collaborative methods cluster tightly at RMSE $\approx 1.1$–$1.2$,
 barely below — and for Item-KNN equal to — the Global Mean predictor (1.2143 / 1.1516 /
@@ -587,6 +658,17 @@ that work to its source (Cai et al., 2022; Elahi et al., 2023).
 Table 6 decomposes the contribution of each component, and the decomposition is
 unusually clean because the two candidate explanations — the attention architecture and
 the model-based aspect signal — can be toggled independently.
+
+**Table 6. Ablation — RMSE (mean ± SD over 5 seeds).** Toggling architecture vs. signal.
+
+| Variant | Amazon | Restaurant | Hotel |
+|---|---:|---:|---:|
+| A2-IRM (static fusion, keyword-ABSA) | 0.6517 ± .003 | 0.6791 ± .001 | 0.6291 ± .003 |
+| Attention-gated fusion, no PyABSA (architecture only) | 0.6520 ± .002 | 0.6773 ± .001 | 0.6286 ± .003 |
+| Static tree + PyABSA (signal only; attribution control) | 0.6384 ± .001 | 0.6676 ± .001 | 0.6201 ± .003 |
+| Attention + PyABSA order-statistics | 0.6407 ± .002 | 0.6674 ± .001 | 0.6216 ± .003 |
+| **A2-FusionRS (attention + aspect-sequence pooling)** | **0.6418 ± .002** | **0.6665 ± .001** | **0.6196 ± .003** |
+
 
 Consider first the architecture in isolation. Replacing A2-IRM's static fusion with
 attention-gated fusion, while giving it *exactly the information A2-IRM already uses*,
@@ -669,6 +751,17 @@ between keyword coverage and the aspect-modality gate weight is negative ($r=-0.
 lean on the model-based aspect signal precisely where keyword-ABSA is weak. With only
 three domains this is indicative rather than conclusive, and we present it as such.
 
+**Table 7. Interpretability — mean gate weight per modality (5 seeds).** (§6.5, Exp-A.)
+
+| Domain (keyword coverage) | DeepMF | CBF | Keyword-ABSA | PyABSA-aspect |
+|---|---:|---:|---:|---:|
+| Amazon (45.1%) | 0.236 | 0.234 | 0.251 | 0.279 |
+| Restaurant (87.6%) | 0.239 | 0.224 | 0.248 | 0.290 |
+| Hotel (95.9%) | 0.201 | 0.302 | 0.286 | 0.211 |
+
+*Pearson r(keyword coverage, PyABSA-aspect gate) = −0.52.*
+
+
 **Aspect attention and its faithfulness.** The aspect-pooling weights identify which
 aspects of a review the model attends to; representative cases are shown in Table 9. To
 test whether these weights are *faithful* — whether the most-attended aspect actually
@@ -685,6 +778,30 @@ we note it is faithful to the residual *correction* the fusion adds over the sta
 not to the entire prediction, and that the illustrative cases are not uniformly clean
 (the perturbation agreement is ~70%, not 100%).
 
+**Table 8. Interpretability — aspect-attention faithfulness (perturbation test).** (§6.5,
+Exp-C; seed 42; reviews with ≥2 aspects.)
+
+| Domain | \|Δ\| remove top-attended | \|Δ\| remove random | top > random | Wilcoxon p |
+|---|---:|---:|---:|:--:|
+| Amazon | 0.0511 | 0.0160 | 71.2% | ≈ 0 |
+| Restaurant | 0.0603 | 0.0319 | 69.9% | ≈ 0 |
+| Hotel | 0.0475 | 0.0214 | 71.3% | ≈ 0 |
+
+
+**Table 9. Representative aspect-attention case studies** (§6.5, Exp-B; seed 42). For each
+review the model's most-attended aspect, its sentiment (P(pos)), and the predicted vs.
+actual rating are shown; attention concentrates on the aspect that drives the rating.
+
+| Domain | Review aspects | Top-attended (attn.) | Sentiment | Predicted | Actual |
+|---|---|---|---|---:|---:|
+| Amazon | working \| **charge** | charge (0.99) | negative (0.00) | 1.73 | 1.0 |
+| Amazon | display \| sound | display (0.98) | negative (0.00) | 2.97 | 4.0 |
+| Restaurant | price \| **stuff** | stuff (0.87) | positive (1.00) | 4.42 | 4.0 |
+| Restaurant | waitress \| **waiting** | waiting (0.88) | negative (0.00) | 1.60 | 3.0 |
+| Hotel | staff \| **comfort** | comfort (0.88) | positive (1.00) | 4.91 | 5.0 |
+| Hotel | **rooms** \| water | rooms (0.95) | negative (0.01) | 2.29 | 3.0 |
+
+
 ### 6.6 Efficiency
 
 Table 10 places A2-FusionRS against the collaborative baselines on the same GPU. Two
@@ -696,6 +813,27 @@ pre-computed modality features and runs only a compact fusion head, so it is fas
 Second, the fusion head carries just ≈ 63k trainable parameters, one to two orders of
 magnitude fewer than the baselines' 0.7–3.1 M, because the collaborative baselines must
 store full user/item embedding tables whereas A2-FusionRS learns only the fusion.
+
+**Table 10. Efficiency** (ranges over the three domains, same GPU; timing at seed 42,
+A2-FusionRS averaged over 5 seeds). "Trainable params" is the full model for the baselines
+but the *fusion head only* for A2-FusionRS (its DeepMF/CBF/PyABSA encoders are frozen and
+excluded); the two are therefore not directly comparable and are read together with the
+note below. Inference is the wall-clock time to score the full test set.
+
+| Model | Trainable params | Train time (s) | Inference (ms) |
+|---|---:|---:|---:|
+| Item-KNN | — (memory-based) | 0.3 – 3.0 | 66 – 392 |
+| SVD | 1.10 – 2.42 M | 0.6 – 1.1 | 58 – 112 |
+| NeuMF | 1.42 – 3.09 M | 30 – 50 | 23 – 122 |
+| DeepFM | 0.74 – 1.58 M | 28 – 42 | 24 – 82 |
+| **A2-FusionRS** (fusion head) | **≈ 0.063 M** | 26 – 41 | **11 – 15** |
+
+*Note. A2-FusionRS's small parameter count and low inference latency reflect that, at serving
+time, it fuses pre-computed modality features with a compact head; it does not imply the
+system is lighter end-to-end, since it reuses upstream encoders (and an offline PyABSA
+pass) that the pure-CF baselines do not require. The directly comparable figure is
+inference latency, where A2-FusionRS is the fastest.*
+
 
 We are careful not to over-read this. The 63k figure is the *marginal* trainable cost:
 A2-FusionRS reuses frozen DeepMF, CBF, and PyABSA encoders and an offline aspect-scoring
@@ -878,138 +1016,3 @@ of Fig. 3 ($r=-0.52$ between coverage and aspect-gate weight).
 
 ---
 
-## Tables
-
-> Values are extracted from the run outputs by `build_manuscript_tables.py` and
-> `analyze_interpretability.py`. Tables 2, 4, 6, 7, 8, 9, and 10 are populated with real
-> figures; the only gap is cross-model efficiency timing (Table 10 reports the
-> A2-FusionRS fusion-head cost, as the baselines were not instrumented under the same
-> harness).
-
-**Table 1. Positioning of A2-FusionRS relative to representative review-aware recommenders.**
-"Aspect vocabulary" is fixed (keyword/taxonomy) or open (model-based); "Attribution" marks
-whether the accuracy gain is credited to a source through a same-signal control;
-"Interpretability" marks whether attributions are provided and, in parentheses, whether they
-are validated (e.g., faithfulness-tested).
-
-| Method | Review signal | Aspect vocabulary | Fusion | Attribution control | Interpretability |
-|---|---|---|---|:--:|---|
-| Cai et al. (2022), DeepCGSR | reviews + ratings | — (cross-grained sentiment) | deep MF mapping | no | no |
-| Zhang et al. (2023), MA-GNN | reviews | fixed (aspect) | routing GNN | no | partial |
-| Cui et al. (2024), RAKCR | reviews + KG | fixed (aspect) | KG-CNN | no | partial |
-| Yang et al. (2024b), AARN | reviews | fixed (ABSA) | attention | no | yes (attention) |
-| Kim et al. (2024), AXCF | reviews | fixed (ABSA) | graph CF | no | yes (aspect) |
-| Darraz et al. (2025), A2-IRM | reviews | fixed (keyword) | NMF + tree (static) | no | limited |
-| **A2-FusionRS (ours)** | reviews | **fixed + open (model-based)** | **attention-gated** | **yes (signal vs. architecture)** | **yes (gate + faithfulness-tested)** |
-
-**Table 2. Dataset statistics.** Coverage measures: fraction of reviews with ≥1 extracted
-aspect (keyword vs. PyABSA); avg. aspects/review from PyABSA.
-
-| Domain | #Users | #Items | #Interactions | #Test | Sparsity | Keyword coverage | PyABSA coverage | Aspects/review |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Amazon Electronics | 14,749 | 9,226 | 122,062 | 16,580 | 99.91% | 45.1% | 80.4% | 1.81 |
-| Yelp Restaurant | 7,152 | 3,757 | 118,695 | 13,233 | 99.56% | 87.6% | 78.2% | 2.70 |
-| TripAdvisor Hotel | 11,236 | 2,056 | 79,562 | 11,795 | 99.66% | 95.9% | 70.2% | 2.77 |
-
-**Table 3. Key hyperparameters.**
-
-| Component | Setting |
-|---|---|
-| DeepMF | embedding 128; hidden [256,128,64,32]; dropout 0.3; SGD, lr 1e-3; batch 512; 20 epochs; no negative sampling |
-| CBF | item PCA + user cluster preference (components/clusters per config) |
-| Item-KNN | k=40; cosine; item-based |
-| SVD | 100 factors; 20 epochs; lr 5e-3; reg 2e-2 |
-| NeuMF / DeepFM | embedding 64; MLP [128,64,32]; dropout 0.2; Adam, lr 1e-3, weight decay 1e-6; batch 512; 20 epochs |
-| A2-FusionRS (AGF) | d=64; heads H=2; aspect embedding d_a=16; max aspects 8; aspect vocab V=500 (train-only); Adam + weight decay; best-val restore; residual base via 5-fold OOF |
-
-**Table 4. Overall performance — RMSE and MAE (mean over 5 seeds), lower is better.** Best
-per column in bold. Ranking metrics (Precision/Recall/NDCG@K) are near-saturated under the
-restricted-candidate protocol (Section 5.2) and do not discriminate between models; they
-are omitted here and reported in the supplementary material.
-
-| Model | RMSE Amazon | RMSE Restaurant | RMSE Hotel | MAE Amazon | MAE Restaurant | MAE Hotel |
-|---|---:|---:|---:|---:|---:|---:|
-| Global Mean (reference) | 1.2143 | 1.1516 | 0.9163 | — | — | — |
-| Item-KNN | 1.2240 | 1.2019 | 0.9163 | 0.8311 | 0.9237 | 0.6917 |
-| SVD | 1.1420 | 1.0753 | 0.8953 | 0.8030 | 0.8454 | 0.6954 |
-| NeuMF | 1.1528 | 1.0740 | 0.8399 | 0.7989 | 0.8468 | 0.6632 |
-| DeepFM | 1.1529 | 1.0746 | 0.8393 | 0.8025 | 0.8434 | 0.6619 |
-| A2-IRM (hybrid, prior) | 0.6517 | 0.6791 | 0.6291 | 0.4386 | 0.5505 | 0.5127 |
-| **A2-FusionRS** | **0.6418** | **0.6665** | **0.6196** | **0.4115** | **0.5389** | **0.4996** |
-
-*Per-seed standard deviations (RMSE) are ≤ 0.003 throughout; see Table 6 for ± values on
-the ablation variants.*
-
-**Table 5. Significance of A2-FusionRS vs. each baseline** (paired Wilcoxon on per-interaction
-squared error; number of seeds out of 5 with $p<0.05$).
-
-| Comparison | Amazon | Restaurant | Hotel |
-|---|:--:|:--:|:--:|
-| A2-FusionRS vs A2-IRM | 5/5 | 5/5 | 5/5 |
-| A2-FusionRS vs NeuMF | 5/5 | 5/5 | 5/5 |
-| A2-FusionRS vs DeepFM | 5/5 | 5/5 | 5/5 |
-| A2-FusionRS vs SVD | 5/5 | 5/5 | 5/5 |
-| A2-FusionRS vs Item-KNN | 5/5 | 5/5 | 5/5 |
-| (attribution) static tree + PyABSA vs A2-IRM | 5/5 | 5/5 | 5/5 |
-
-**Table 6. Ablation — RMSE (mean ± SD over 5 seeds).** Toggling architecture vs. signal.
-
-| Variant | Amazon | Restaurant | Hotel |
-|---|---:|---:|---:|
-| A2-IRM (static fusion, keyword-ABSA) | 0.6517 ± .003 | 0.6791 ± .001 | 0.6291 ± .003 |
-| Attention-gated fusion, no PyABSA (architecture only) | 0.6520 ± .002 | 0.6773 ± .001 | 0.6286 ± .003 |
-| Static tree + PyABSA (signal only; attribution control) | 0.6384 ± .001 | 0.6676 ± .001 | 0.6201 ± .003 |
-| Attention + PyABSA order-statistics | 0.6407 ± .002 | 0.6674 ± .001 | 0.6216 ± .003 |
-| **A2-FusionRS (attention + aspect-sequence pooling)** | **0.6418 ± .002** | **0.6665 ± .001** | **0.6196 ± .003** |
-
-**Table 7. Interpretability — mean gate weight per modality (5 seeds).** (§6.5, Exp-A.)
-
-| Domain (keyword coverage) | DeepMF | CBF | Keyword-ABSA | PyABSA-aspect |
-|---|---:|---:|---:|---:|
-| Amazon (45.1%) | 0.236 | 0.234 | 0.251 | 0.279 |
-| Restaurant (87.6%) | 0.239 | 0.224 | 0.248 | 0.290 |
-| Hotel (95.9%) | 0.201 | 0.302 | 0.286 | 0.211 |
-
-*Pearson r(keyword coverage, PyABSA-aspect gate) = −0.52.*
-
-**Table 8. Interpretability — aspect-attention faithfulness (perturbation test).** (§6.5,
-Exp-C; seed 42; reviews with ≥2 aspects.)
-
-| Domain | \|Δ\| remove top-attended | \|Δ\| remove random | top > random | Wilcoxon p |
-|---|---:|---:|---:|:--:|
-| Amazon | 0.0511 | 0.0160 | 71.2% | ≈ 0 |
-| Restaurant | 0.0603 | 0.0319 | 69.9% | ≈ 0 |
-| Hotel | 0.0475 | 0.0214 | 71.3% | ≈ 0 |
-
-**Table 9. Representative aspect-attention case studies** (§6.5, Exp-B; seed 42). For each
-review the model's most-attended aspect, its sentiment (P(pos)), and the predicted vs.
-actual rating are shown; attention concentrates on the aspect that drives the rating.
-
-| Domain | Review aspects | Top-attended (attn.) | Sentiment | Predicted | Actual |
-|---|---|---|---|---:|---:|
-| Amazon | working \| **charge** | charge (0.99) | negative (0.00) | 1.73 | 1.0 |
-| Amazon | display \| sound | display (0.98) | negative (0.00) | 2.97 | 4.0 |
-| Restaurant | price \| **stuff** | stuff (0.87) | positive (1.00) | 4.42 | 4.0 |
-| Restaurant | waitress \| **waiting** | waiting (0.88) | negative (0.00) | 1.60 | 3.0 |
-| Hotel | staff \| **comfort** | comfort (0.88) | positive (1.00) | 4.91 | 5.0 |
-| Hotel | **rooms** \| water | rooms (0.95) | negative (0.01) | 2.29 | 3.0 |
-
-**Table 10. Efficiency** (ranges over the three domains, same GPU; timing at seed 42,
-A2-FusionRS averaged over 5 seeds). "Trainable params" is the full model for the baselines
-but the *fusion head only* for A2-FusionRS (its DeepMF/CBF/PyABSA encoders are frozen and
-excluded); the two are therefore not directly comparable and are read together with the
-note below. Inference is the wall-clock time to score the full test set.
-
-| Model | Trainable params | Train time (s) | Inference (ms) |
-|---|---:|---:|---:|
-| Item-KNN | — (memory-based) | 0.3 – 3.0 | 66 – 392 |
-| SVD | 1.10 – 2.42 M | 0.6 – 1.1 | 58 – 112 |
-| NeuMF | 1.42 – 3.09 M | 30 – 50 | 23 – 122 |
-| DeepFM | 0.74 – 1.58 M | 28 – 42 | 24 – 82 |
-| **A2-FusionRS** (fusion head) | **≈ 0.063 M** | 26 – 41 | **11 – 15** |
-
-*Note. A2-FusionRS's small parameter count and low inference latency reflect that, at serving
-time, it fuses pre-computed modality features with a compact head; it does not imply the
-system is lighter end-to-end, since it reuses upstream encoders (and an offline PyABSA
-pass) that the pure-CF baselines do not require. The directly comparable figure is
-inference latency, where A2-FusionRS is the fastest.*
