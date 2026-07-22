@@ -95,9 +95,12 @@ Our contributions are:
 2. **An attribution study** that separates the effect of the fusion architecture from the
    effect of the added signal. Through component ablations and a control that fuses the
    same model-based aspect features with a static tree, we show the improvement is
-   attributable to the aspect modality, and that the attention mechanism *matches* rather
-   than beats the static fusion on accuracy — a deliberately falsifiable result that
-   corrects a common mis-attribution.
+   attributable to the aspect modality, and that the *modality-fusion* attention (Section
+   4.3) *matches* rather than beats the static fusion on accuracy — a deliberately
+   falsifiable result that corrects a common mis-attribution. The *aspect-level* attention
+   inside the sentiment encoder (Section 4.2) is a separate mechanism, and its value is
+   established directly: it is what lets the model consume open-vocabulary aspects without
+   hand-engineered features, and it passes a faithfulness test (Section 6.5).
 3. **A coverage-dependence finding**: the benefit of model-based ABSA grows as the
    fixed-taxonomy keyword coverage of a domain falls, giving practical guidance on when the
    costlier encoder is worth adopting.
