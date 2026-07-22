@@ -83,17 +83,28 @@ def table4():
 
 
 def table10():
-    print("\n### Table 10. Efficiency (A2-FusionRS; mean over 5 seeds)")
-    for dom in DOMAINS:
-        np_, tt, pt = [], [], []
-        for s in SEEDS:
-            p = RD / f"agf_agf_keyword_oof_perseq_{dom}_seed{s}.yaml"
-            if not p.exists():
-                continue
-            y = yaml.safe_load(open(p))
-            np_.append(y.get("n_parameters")); tt.append(y.get("train_time_seconds")); pt.append(y.get("predict_time_seconds"))
-        f = lambda v: (np.nanmean([x for x in v if x is not None]) if any(x is not None for x in v) else float("nan"))
-        print(f"  {dom:20s} params={f(np_):.0f}  train={f(tt):.1f}s  predict={f(pt):.3f}s")
+    print("\n### Table 10. Efficiency (baselines seed 42; A2-FusionRS mean over 5 seeds)")
+    print(f"{'Model':14s}{'Domain':20s}{'params':>13s}{'train(s)':>10s}{'predict(ms)':>13s}")
+
+    def row(name, pfx, seeds):
+        for dom in DOMAINS:
+            np_, tt, pt = [], [], []
+            for s in seeds:
+                p = RD / f"{pfx}_{dom}_seed{s}.yaml"
+                if not p.exists():
+                    continue
+                y = yaml.safe_load(open(p))
+                np_.append(y.get("n_parameters")); tt.append(y.get("train_time_seconds")); pt.append(y.get("predict_time_seconds"))
+            f = lambda v: (np.nanmean([x for x in v if x is not None]) if any(x is not None for x in v) else None)
+            npar, t, p_ = f(np_), f(tt), f(pt)
+            fs = lambda x, fm: (fm.format(x) if x is not None else "   —   ")
+            print(f"{name:14s}{dom:20s}{fs(npar,'{:,.0f}'):>13s}{fs(t,'{:.1f}'):>10s}"
+                  f"{fs(p_*1000 if p_ is not None else None,'{:.1f}'):>13s}")
+
+    for name, pfx in [("Item-KNN", "classical_cf_item_knn"), ("SVD", "classical_cf_svd"),
+                      ("NeuMF", "neural_cf_neumf"), ("DeepFM", "neural_cf_deepfm")]:
+        row(name, pfx, [42])
+    row("A2-FusionRS", "agf_agf_keyword_oof_perseq", SEEDS)
 
 
 if __name__ == "__main__":
