@@ -80,10 +80,16 @@
 | saifudin2024 | Saifudin I., Widiyaningtyas T. Systematic literature review on recommender system. *IEEE Access*, 12:19827–19847, 2024. | IEEE Access | 10.1109/ACCESS.2024.3359274 |
 | tiwary2024 | Tiwary N., et al. A review of explainable recommender systems utilizing knowledge graphs and RL. *IEEE Access*, 12:91999–92019, 2024. | IEEE Access | 10.1109/ACCESS.2024.3422416 |
 
+## C. Dataset provenance (verified via web/DOI lookup)
+
+| Key | Citation | Venue | DOI / URL |
+|---|---|---|---|
+| ni2019amazon | Ni J., Li J., McAuley J. Justifying recommendations using distantly-labeled reviews and fine-grained aspects. *Proc. EMNLP-IJCNLP 2019*, 188–197. (Amazon Review Data 2018) | EMNLP | 10.18653/v1/D19-1018 |
+| wang2010lara | Wang H., Lu Y., Zhai C. Latent aspect rating analysis on review text data: a rating regression approach. *Proc. KDD '10*, 783–792. (TripAdvisor hotel reviews) | KDD (ACM) | 10.1145/1835804.1835903 |
+| yelp_dataset | Yelp Open Dataset. Yelp Inc. (public dataset; no DOI) | dataset | https://www.yelp.com/dataset |
+
 ## Notes / to confirm
-- **darraz2025irm** is the presumed Phase-1 (A2-IRM) predecessor — CONFIRM with author.
-- Dataset provenance (Amazon/McAuley, Yelp Open Dataset, TripAdvisor) still needs
-  a source citation each — not in the SLR set; source separately.
+- **darraz2025irm** = Phase-1 (A2-IRM) predecessor — **CONFIRMED by author.**
 - Statistical-comparison methodology (Wilcoxon signed-rank for ML) — optional
   Demšar (2006) *JMLR* citation; not in the SLR set.
 - Full SLR CSV retained by author (~90 items) — remainder available if more

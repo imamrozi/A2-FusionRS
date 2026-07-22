@@ -3,8 +3,7 @@
 > **Working draft — target: Expert Systems with Applications (Q1).** Complete draft:
 > Abstract + §1–§7 + Tables 2–10. Table values are extracted from the run outputs by
 > `build_manuscript_tables.py` and `analyze_interpretability.py`; all citations map to
-> verified DOIs in `A2-FusionRS_references.md`. Remaining `[REF: ...]` markers flag
-> dataset-provenance citations still to be sourced.
+> verified DOIs (or dataset URLs) in `A2-FusionRS_references.md`.
 
 ---
 
@@ -236,8 +235,8 @@ rating scale.
 
 A2-FusionRS draws on three complementary views of each interaction, reused from the
 A2-IRM baseline — a hybrid of deep matrix factorization, content-based clustering,
-and NMF + decision-tree fusion in the lineage of Darraz et al. (2025) [CONFIRM: this
-is the Phase-1 predecessor citation] — and extended here:
+and NMF + decision-tree fusion, the Phase-1 predecessor of this work (Darraz et al.,
+2025) — and extended here:
 
 - **Collaborative (DeepMF).** A deep matrix-factorization model over user/item
   embeddings captures latent collaborative structure and yields a rating estimate
@@ -442,8 +441,10 @@ attention weights are not automatically faithful explanations (Jain & Wallace, 2
 ### 5.1 Datasets
 
 We evaluate on three public review corpora chosen to span distinct domains *and* distinct
-sparsity/aspect regimes: **Amazon Electronics**, **Yelp Restaurant**, and **TripAdvisor
-Hotel**. Each record contains a user, an item, a 1–5 star rating, and a free-text review.
+sparsity/aspect regimes: **Amazon Electronics** (from the Amazon Review Data; Ni et al.,
+2019), **Yelp Restaurant** (Yelp Open Dataset, 2024), and **TripAdvisor Hotel** (the hotel
+reviews of Wang et al., 2010). Each record contains a user, an item, a 1–5 star rating,
+and a free-text review.
 The three corpora were selected deliberately rather than for convenience: they place the
 same rating-prediction task under three different levels of aspect availability, which is
 the axis our analysis (Sections 6.4–6.5) turns on. Each corpus is reduced with 5-core
@@ -464,8 +465,7 @@ corresponding coverage of the open-vocabulary PyABSA encoder, which is higher on
 aspect-sparse Amazon domain than keyword matching achieves. This deliberate spread in
 keyword coverage is precisely what lets us ask *when*, not merely *whether*, model-based
 aspect sentiment helps. The held-out test sets contain 16,580 (Amazon), 13,233
-(Restaurant), and 11,795 (Hotel) interactions. [REF: dataset provenance — Amazon/McAuley,
-Yelp Open Dataset, TripAdvisor — to be added.]
+(Restaurant), and 11,795 (Hotel) interactions.
 
 ### 5.2 Split and protocol
 
@@ -745,9 +745,11 @@ whether the exposed aspect attributions actually help end users judge recommenda
 
 ## Tables
 
-> Values are drawn from `A2-FusionRS_results_ledger.md`. Entries marked "[fill]" require
-> figures not yet extracted (dataset provenance counts; MAE/ranking; efficiency; Exp-B
-> case studies pending the interpretability re-run).
+> Values are extracted from the run outputs by `build_manuscript_tables.py` and
+> `analyze_interpretability.py`. Tables 2, 4, 6, 7, 8, 9, and 10 are populated with real
+> figures; the only gap is cross-model efficiency timing (Table 10 reports the
+> A2-FusionRS fusion-head cost, as the baselines were not instrumented under the same
+> harness).
 
 **Table 2. Dataset statistics.** Coverage measures: fraction of reviews with ≥1 extracted
 aspect (keyword vs. PyABSA); avg. aspects/review from PyABSA.
