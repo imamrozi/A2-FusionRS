@@ -114,6 +114,21 @@ Prefix file: `<prefix>_<domain>_seed<seed>.yaml`
 aspek-top searah prediksi). JUJUR: tak semua kasus koheren (Exp-C: ~70%, bukan
 100%); banyak aspek top = <UNK> di luar vocab top-500 (terutama Amazon).
 
+## 5c. Efisiensi (Tabel 10) — seed 42 (A2-FusionRS rata-rata 5 seed), GPU sama
+
+| Model | params | train(s) A/R/H | inferensi(ms) A/R/H |
+|---|---|---|---|
+| Item-KNN | — (memory-based) | 3,0/0,9/0,3 | 180/392/66 |
+| SVD | 2,42M/1,10M/1,34M | 1,1/0,9/0,6 | 112/85/58 |
+| NeuMF | 3,09M/1,42M/1,73M | 49,9/41,8/29,5 | 32/23/122 |
+| DeepFM | 1,58M/0,74M/0,89M | 42,3/40,7/28,2 | 35/24/82 |
+| A2-FusionRS (fusion head) | ~0,063M | 40,6/38,9/26,2 | 14,5/11,5/10,6 |
+
+> JUJUR: params A2-FusionRS = fusion head SAJA (encoder DeepMF/CBF/PyABSA beku,
+> dikecualikan) → BUKAN "lebih ringan end-to-end". Yang sah dibandingkan langsung
+> = latensi inferensi (A2-FusionRS TERCEPAT, 11–15ms). Trade-off: pra-komputasi
+> offline (DeepMF + skoring PyABSA) yang baseline pure-CF tak butuh.
+
 ## 6. Klaim yang BOLEH & TIDAK BOLEH ditulis
 
 BOLEH (didukung data):

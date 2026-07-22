@@ -682,15 +682,24 @@ not to the entire prediction, and that the illustrative cases are not uniformly 
 
 ### 6.6 Efficiency
 
-Table 10 reports the cost of the attention-gated fusion head, which is the component
-A2-FusionRS adds over the pre-computed modality encoders and over the static A2-IRM base.
-The head is deliberately small: roughly 62,600 trainable parameters, about 27–41 seconds
-to train, and 11–14 milliseconds to score a full test set. In other words, the accuracy
-gain and the interpretability come at a negligible marginal cost over the A2-IRM pipeline
-the model extends. We did not instrument the collaborative baselines under the identical
-timing harness, so we report the fusion-head cost rather than a cross-model timing table;
-the parameter figure should be read as the trainable fusion cost, not as the total model
-size including the (frozen) upstream encoders.
+Table 10 places A2-FusionRS against the collaborative baselines on the same GPU. Two
+readings matter, and they point in the same direction only if stated carefully. First,
+inference latency — the one directly comparable figure, since it is the wall-clock cost of
+scoring the same test set — is *lowest* for A2-FusionRS (11–15 ms) versus 23–122 ms for
+the neural baselines and up to 392 ms for Item-KNN. At serving time the model looks up
+pre-computed modality features and runs only a compact fusion head, so it is fast.
+Second, the fusion head carries just ≈ 63k trainable parameters, one to two orders of
+magnitude fewer than the baselines' 0.7–3.1 M, because the collaborative baselines must
+store full user/item embedding tables whereas A2-FusionRS learns only the fusion.
+
+We are careful not to over-read this. The 63k figure is the *marginal* trainable cost:
+A2-FusionRS reuses frozen DeepMF, CBF, and PyABSA encoders and an offline aspect-scoring
+pass that the pure-CF baselines do not need, so the system is not lighter end-to-end. Its
+training time (26–41 s for the head) is comparable to the neural baselines' but likewise
+excludes that upstream cost. The honest summary is that A2-FusionRS shifts effort to an
+offline precomputation stage and, in return, serves recommendations with low online
+latency and a small trainable footprint — an appropriate profile for a deployed recommender
+but not a claim of lower total cost.
 
 ### 6.7 Threats to validity
 
@@ -844,15 +853,22 @@ actual rating are shown; attention concentrates on the aspect that drives the ra
 | Hotel | staff \| **comfort** | comfort (0.88) | positive (1.00) | 4.91 | 5.0 |
 | Hotel | **rooms** \| water | rooms (0.95) | negative (0.01) | 2.29 | 3.0 |
 
-**Table 10. Efficiency of A2-FusionRS** (fusion head; mean over 5 seeds). The attention/gating
-head is trained over pre-computed modality encoders; it adds only a small number of
-trainable parameters and negligible inference latency.
+**Table 10. Efficiency** (ranges over the three domains, same GPU; timing at seed 42,
+A2-FusionRS averaged over 5 seeds). "Trainable params" is the full model for the baselines
+but the *fusion head only* for A2-FusionRS (its DeepMF/CBF/PyABSA encoders are frozen and
+excluded); the two are therefore not directly comparable and are read together with the
+note below. Inference is the wall-clock time to score the full test set.
 
-| Domain | Trainable params (fusion head) | Train time | Inference time |
+| Model | Trainable params | Train time (s) | Inference (ms) |
 |---|---:|---:|---:|
-| Amazon | 62,629 | 40.6 s | 0.014 s |
-| Restaurant | 62,501 | 38.9 s | 0.012 s |
-| Hotel | 62,757 | 26.2 s | 0.011 s |
+| Item-KNN | — (memory-based) | 0.3 – 3.0 | 66 – 392 |
+| SVD | 1.10 – 2.42 M | 0.6 – 1.1 | 58 – 112 |
+| NeuMF | 1.42 – 3.09 M | 30 – 50 | 23 – 122 |
+| DeepFM | 0.74 – 1.58 M | 28 – 42 | 24 – 82 |
+| **A2-FusionRS** (fusion head) | **≈ 0.063 M** | 26 – 41 | **11 – 15** |
 
-*Timing of the collaborative baselines was not instrumented under the identical harness;
-we report the fusion-head cost, which is the marginal cost A2-FusionRS adds over A2-IRM.*
+*Note. A2-FusionRS's small parameter count and low inference latency reflect that, at serving
+time, it fuses pre-computed modality features with a compact head; it does not imply the
+system is lighter end-to-end, since it reuses upstream encoders (and an offline PyABSA
+pass) that the pure-CF baselines do not require. The directly comparable figure is
+inference latency, where A2-FusionRS is the fastest.*
