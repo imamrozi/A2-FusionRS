@@ -45,8 +45,8 @@
 | cai2022 | Cai Y., Ke W., Cui E., Yu F. A deep recommendation model of cross-grained sentiments of user reviews and ratings (DeepCGSR). *Information Processing & Management*, 59(2):102842, 2022. | IPM (Q1) | 10.1016/j.ipm.2021.102842 |
 | ou2024 | Ou W., Huynh V.-N. Aspect-level item recommendation based on user reviews with variational autoencoders. *Information Sciences*, 671:120655, 2024. | Inf. Sci. (Q1) | 10.1016/j.ins.2024.120655 |
 | kim2024axcf | Kim D., Li Q., Jang D., Kim J. AXCF: Aspect-based collaborative filtering for explainable recommendations. *Expert Systems*, 41(8):e13594, 2024. | Expert Systems (Q2) | 10.1111/exsy.13594 |
-| yang2024ijhm | Yang S., Li Q., Jang D., Kim J. Developing personalized restaurant recommendation model with ABSA. *Int. J. Hospitality Management*, 121:103803, 2024. | IJHM (Q1) | 10.1016/j.ijhm.2024.103803 |
-| yang2024aarn | Yang S., Li Q., Lim H., Kim J. An attentive aspect-based recommendation model with deep neural network (AARN). *IEEE Access*, 12:5781–5791, 2024. | IEEE Access (Q1/Q2) | 10.1109/ACCESS.2023.3349291 |
+| yang2024a_ijhm | Yang S., Li Q., Jang D., Kim J. (**2024a**) Developing personalized restaurant recommendation model with ABSA. *Int. J. Hospitality Management*, 121:103803, 2024. | IJHM (Q1) | 10.1016/j.ijhm.2024.103803 |
+| yang2024b_aarn | Yang S., Li Q., Lim H., Kim J. (**2024b**) An attentive aspect-based recommendation model with deep neural network (AARN). *IEEE Access*, 12:5781–5791, 2024. | IEEE Access (Q1/Q2) | 10.1109/ACCESS.2023.3349291 |
 | poudel2022 | Poudel S., Bikdash M. Collaborative filtering based on multi-level user clustering and aspect sentiment. *Data & Information Management*, 6(4):100021, 2022. | DIM | 10.1016/j.dim.2022.100021 |
 | zhang2023magnn | Zhang C., et al. Multi-aspect enhanced graph neural networks for recommendation. *Neural Networks*, 157:90–102, 2023. | Neural Networks (Q1) | 10.1016/j.neunet.2022.10.001 |
 | cui2024rakcr | Cui Y., et al. RAKCR: Reviews sentiment-aware knowledge graph convolutional networks. *ESWA*, 248:123403, 2024. | ESWA (Q1) | 10.1016/j.eswa.2024.123403 |
@@ -55,6 +55,7 @@
 **Sentiment/review-based recommendation & rating-review inconsistency**
 | Key | Citation | Venue | DOI |
 |---|---|---|---|
+| abinaya2021 | Abinaya S., Devi M.K.K. Enhancing Top-N recommendation using stacked autoencoder in context-aware recommender system. *Neural Processing Letters*, 53:1865–1888, 2021. (uses Amazon 5-core) | Neural Process. Lett. (Q2) | 10.1007/s11063-021-10475-0 |
 | rabiu2022 | Rabiu I., Salim N., Da'u A., Nasser M. Modeling sentimental bias and temporal dynamics for adaptive deep recommendation. *ESWA*, 191:116262, 2022. | ESWA (Q1) | 10.1016/j.eswa.2021.116262 |
 | elahi2023 | Elahi M., et al. Hybrid recommendation by incorporating the sentiment of product reviews. *Information Sciences*, 625:738–756, 2023. | Inf. Sci. (Q1) | 10.1016/j.ins.2023.01.051 |
 | aramanda2023 | Aramanda A., Md.Abdul S., Vedala R. enemos-p: enhanced emotion specific prediction (rating-review inconsistency). *ESWA*, 227:120190, 2023. | ESWA (Q1) | 10.1016/j.eswa.2023.120190 |

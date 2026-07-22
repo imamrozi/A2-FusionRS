@@ -237,30 +237,51 @@ attention weights are not automatically faithful explanations (Jain & Wallace, 2
 
 ### 5.1 Datasets
 
-We evaluate on three public review corpora that span distinct domains and sparsity
-regimes: **Amazon Electronics**, **Yelp Restaurant**, and **TripAdvisor Hotel**. Each
-record contains a user, an item, a 1–5 star rating, and a free-text review. Following
-common practice for review-based recommendation (Cai et al., 2022; Yang et al., 2024),
-the corpora are reduced with 5-core filtering so that every retained user and item has
-at least five interactions, which bounds — but does not eliminate — cold-start effects.
-Table 2 reports the resulting statistics, including the two ABSA coverage measures that
-matter for this study: the fraction of reviews for which the fixed-taxonomy keyword
-encoder finds at least one aspect, and the corresponding coverage of the open-vocabulary
-PyABSA encoder. Keyword coverage differs markedly across domains — 45.1% (Amazon),
-87.7% (Restaurant), and 95.9% (Hotel) — a spread we exploit in the analysis of
-Section 6.4. The held-out test sets contain 16,580 (Amazon), 13,233 (Restaurant), and
-11,795 (Hotel) interactions. [REF: dataset provenance — Amazon/McAuley, Yelp Open
-Dataset, TripAdvisor — to be added.]
+We evaluate on three public review corpora chosen to span distinct domains *and* distinct
+sparsity/aspect regimes: **Amazon Electronics**, **Yelp Restaurant**, and **TripAdvisor
+Hotel**. Each record contains a user, an item, a 1–5 star rating, and a free-text review.
+The three corpora were selected deliberately rather than for convenience: they place the
+same rating-prediction task under three different levels of aspect availability, which is
+the axis our analysis (Sections 6.4–6.5) turns on. Each corpus is reduced with 5-core
+filtering — retaining only users and items with at least five interactions — a standard
+preprocessing step for review-based recommendation (Abinaya & Devi, 2021; Cai et al.,
+2022). 5-core filtering bounds, but does not remove, cold-start effects: the user–item
+matrices remain below 0.1% density, so the rating signal alone is thin.
+
+Two properties of the data shape the results and are worth stating up front. First, as is
+typical of voluntary review platforms, the rating distribution is right-skewed toward 4–5
+stars; consequently the standard deviation of test ratings is close to the RMSE a
+constant predictor would attain (Section 6.1), which sets a meaningful reference point for
+interpreting the collaborative baselines. Second, the two ABSA encoders cover the corpora
+very differently. Table 2 reports full statistics, including the coverage measures central
+to this study: the fraction of reviews for which the fixed-taxonomy keyword encoder finds
+at least one aspect — 45.1% (Amazon), 87.7% (Restaurant), 95.9% (Hotel) — and the
+corresponding coverage of the open-vocabulary PyABSA encoder, which is higher on the
+aspect-sparse Amazon domain than keyword matching achieves. This deliberate spread in
+keyword coverage is precisely what lets us ask *when*, not merely *whether*, model-based
+aspect sentiment helps. The held-out test sets contain 16,580 (Amazon), 13,233
+(Restaurant), and 11,795 (Hotel) interactions. [REF: dataset provenance — Amazon/McAuley,
+Yelp Open Dataset, TripAdvisor — to be added.]
 
 ### 5.2 Split and protocol
 
 All models are trained and evaluated on an identical user-based train/validation/test
-split per domain, generated once and reused, so that every method is compared on exactly
-the same held-out interactions. This invariant is enforced structurally: the split is
-produced once and every training script loads it rather than resampling. To separate
-genuine effects from run-to-run stochasticity, each configuration is trained with five
-random seeds ({42, 123, 456, 789, 1011}); we report the mean and standard deviation
-across seeds.
+split per domain. The split holds out later interactions of existing users, which stresses
+a model's ability to track evolving preferences rather than to memorize a static profile.
+Comparability is enforced structurally rather than by convention: the split is generated
+once and every training script — from the classical baselines to A2-FusionRS — loads the
+same files instead of resampling, so all models are scored on exactly the same held-out
+interactions and their per-interaction errors are directly pairable for significance
+testing (Section 5.4). Ranking metrics use a per-user candidate set restricted to the
+items that appear for that user in the test set, a common simplification that keeps the
+ranking evaluation tractable and identical across models; we note it explicitly because it
+makes the reported ranking figures comparative rather than absolute.
+
+Single-seed differences on this data are of the same order as the run-to-run variance of an
+identically configured model, so a one-off comparison is not, by itself, trustworthy.
+Every configuration is therefore trained with five random seeds ({42, 123, 456, 789,
+1011}), and we report the mean and standard deviation across them; all headline claims are
+supported at the level of seeds, not of a single run.
 
 ### 5.3 Baselines
 
@@ -272,16 +293,23 @@ protocol of Section 5.2:
 2. **Classical collaborative filtering** — *Item-KNN* and *SVD* (Koren et al., 2009),
    pure rating-based methods without side information.
 3. **Neural collaborative filtering** — *NeuMF* (He et al., 2017) and *DeepFM*
-   (Guo et al., 2017), re-implemented as explicit-rating predictors (mean-squared-error
-   training, sigmoid on the normalized scale) so that they are directly comparable on
-   RMSE.
+   (Guo et al., 2017). Both were designed for implicit-feedback ranking and click-through
+   prediction; we adapt them faithfully to explicit-rating regression — mean-squared-error
+   training with a sigmoid on the normalized rating scale and the same
+   best-validation-checkpoint policy used elsewhere — so that they are directly comparable
+   on RMSE. This adaptation is not a handicap: it gives each model the objective the task
+   is evaluated on. Importantly, these neural baselines share the embedding-based
+   collaborative backbone family used by the DeepMF stream inside A2-IRM/A2-FusionRS, so a
+   large gap between them and the review-aware models cannot be dismissed as a weak or
+   mismatched baseline.
 4. **Hybrid (review-aware)** — *A2-IRM*, the Phase-1 static-fusion hybrid that combines
    deep matrix factorization, content-based clustering, and keyword-ABSA through an
-   NMF + decision-tree fuser, in the lineage of Darraz et al. (2025).
+   NMF + decision-tree fuser, in the lineage of Darraz et al. (2025). It is the strongest
+   prior model and the direct point of comparison for A2-FusionRS.
 
-The classical and neural collaborative baselines use only the user–item rating signal;
-the contrast between them and the review-aware methods isolates the value of the review
-channel (Duan et al., 2022; Elahi et al., 2023).
+The first three tiers use only the user–item rating signal, whereas A2-IRM and A2-FusionRS
+add the review channel; the contrast across tiers therefore isolates the value of reviews
+from the value of the fusion architecture (Duan et al., 2022; Elahi et al., 2023).
 
 ### 5.4 Metrics and significance testing
 
@@ -314,63 +342,103 @@ GPU; code and configurations are released for reproducibility.
 
 Table 4 reports RMSE (mean ± SD over five seeds) for every model and domain. A2-FusionRS
 achieves the lowest error in all three domains — 0.6418 (Amazon), 0.6665 (Restaurant),
-and 0.6196 (Hotel) — improving over the strongest prior model, A2-IRM, by 1.5%, 1.9%,
-and 1.5% respectively. The improvement over A2-IRM is significant at all five seeds in
-every domain (Table 5), as is the improvement over each of the four external baselines
-($p<0.001$ throughout).
+and 0.6196 (Hotel). Against the strongest prior model, A2-IRM, this is a reduction of
+1.5%, 1.9%, and 1.5%; against the best neural collaborative baseline (NeuMF) it is a
+reduction of 44.3% (Amazon), 37.9% (Restaurant), and 26.2% (Hotel). Every one of these
+comparisons is significant at all five seeds (Table 5): A2-FusionRS versus A2-IRM and
+versus each of the four external baselines yields $p<0.001$ throughout. The advantage is
+thus both large against rating-only methods and consistent — not the product of a
+favorable seed. The MAE and ranking metrics (Precision/Recall/NDCG@K) preserve the same
+ordering and are reported in Table 4.
 
-A striking pattern organizes the baselines. The four pure collaborative methods cluster
-tightly at RMSE $\approx 1.1$–$1.2$, i.e., barely better than — and for Item-KNN
-essentially equal to — the Global Mean predictor (1.2143 / 1.1516 / 0.9163). On Hotel,
-Item-KNN's RMSE (0.9163) coincides with the Global Mean exactly, indicating that under
-extreme sparsity the neighborhood model degenerates to predicting the mean. That four
-independent collaborative methods converge at this level is strong evidence it reflects
-the genuine ceiling of rating-only CF on such sparse review data, not an under-tuned
-baseline (Idrissi & Zellou, 2020; Yuan & Hernandez, 2023). The review-derived content and
-sentiment signals are what move the error from $\approx 1.1$ down to $\approx 0.65$ — a
-31–47% reduction — which is precisely the contribution of review-aware modeling
-(Cai et al., 2022; Elahi et al., 2023).
+The more instructive result is the *structure* of the baseline column. The four pure
+collaborative methods cluster tightly at RMSE $\approx 1.1$–$1.2$, barely below — and for
+Item-KNN equal to — the Global Mean predictor (1.2143 / 1.1516 / 0.9163). This reference
+point is not arbitrary: the RMSE of the constant mean predictor equals the standard
+deviation of the test ratings (an algebraic identity), so a model that matches it has
+learned nothing beyond the average rating. On Hotel, Item-KNN's RMSE (0.9163) coincides
+with the Global Mean to four decimals, showing that under extreme sparsity the
+neighborhood model falls back to the mean for essentially every prediction; the trained
+factorization models (SVD, NeuMF, DeepFM) improve on the mean only marginally, by roughly
+2–8%. That four independent collaborative methods converge at this level is strong
+evidence that $\approx 1.1$ is the genuine ceiling of rating-only CF on review data this
+sparse, rather than an artifact of under-tuning (Idrissi & Zellou, 2020; Yuan &
+Hernandez, 2023). Seen against this ceiling, the review-derived content and sentiment
+signals — which move the error from $\approx 1.1$ down to $\approx 0.65$, a 31–47%
+reduction — are doing the decisive work, and the remainder of this section attributes
+that work to its source (Cai et al., 2022; Elahi et al., 2023).
 
 ### 6.2 Ablation and attribution (RQ2)
 
-Table 6 decomposes the contribution of each component. Removing the model-based aspect
-signal from A2-FusionRS (leaving attention-gated fusion over the same information A2-IRM
-uses) yields RMSE statistically indistinguishable from A2-IRM (0.6520 / 0.6773 / 0.6286
-vs. 0.6517 / 0.6791 / 0.6291): the attention architecture alone, with no new information,
-sits at the same ceiling. Conversely, adding the PyABSA per-aspect signal breaks that
-ceiling — and it does so *regardless of the fusion mechanism*. A control in which the
-same PyABSA features are fused by the static NMF + decision-tree fuser (rather than by
-attention) also beats A2-IRM significantly at all seeds (0.6384 / 0.6676 / 0.6201). The
-gain is therefore attributable to the model-based aspect modality, not to the attention
-fusion per se — an attribution we consider a core, and deliberately falsifiable, finding.
+Table 6 decomposes the contribution of each component, and the decomposition is
+unusually clean because the two candidate explanations — the attention architecture and
+the model-based aspect signal — can be toggled independently.
+
+Consider first the architecture in isolation. Replacing A2-IRM's static fusion with
+attention-gated fusion, while giving it *exactly the information A2-IRM already uses*,
+leaves accuracy essentially unchanged: 0.6520 / 0.6773 / 0.6286 versus A2-IRM's 0.6517 /
+0.6791 / 0.6291. The per-domain gaps are +0.0003, −0.0018, and −0.0005 — all within a
+single standard deviation. This is also the clearest place to see why we insist on
+pairing significance with effect size: on Amazon and Hotel the Wilcoxon test flags these
+differences as significant at several seeds even though the RMSE is, for practical
+purposes, identical — a direct consequence of testing $10^4$ paired errors, and a warning
+against reading such $p$-values as evidence of a real improvement. Read through the effect
+size, the honest conclusion is that the attention architecture, given no new information,
+sits at the same ceiling as the static fuser.
+
+Now toggle the information instead of the architecture. Adding the PyABSA per-aspect
+signal breaks the ceiling, and it does so *regardless of which fuser consumes it*. When
+the same PyABSA features are handed to the static NMF + decision-tree fuser rather than to
+attention, the result (0.6384 / 0.6676 / 0.6201) still beats A2-IRM significantly at all
+five seeds, by 0.0133 / 0.0115 / 0.0090 — an effect roughly an order of magnitude larger
+than the architecture-only differences above. The improvement is therefore attributable
+to the model-based aspect modality, not to the attention mechanism per se. We regard this
+as a central finding precisely because it is falsifiable and was, in fact, a negative
+result for our original hypothesis that the fusion architecture would be the driver;
+reporting it is what distinguishes an attribution from an assertion.
 
 ### 6.3 The role of the fusion mechanism
 
-Given that a static fuser with the same PyABSA features is competitive, does the
-attention mechanism add anything? On raw accuracy, the honest answer is: it matches,
-rather than beats, the static fusion. Across seeds, attention-gated fusion is behind the
-static control on Amazon (+0.0034 RMSE), marginally ahead on Restaurant (−0.0011, four of
-five seeds) and level on Hotel (−0.0005, two of five seeds) — a wash overall. We
-therefore do **not** claim an accuracy advantage for the attention mechanism. Its value
-is elsewhere and is real: it reaches this accuracy while *learning* the aspect
-aggregation end-to-end, whereas the static control requires the hand-engineered
-order-statistics we designed for it; and it exposes per-modality and per-aspect
-attributions that the tree does not (Section 6.5). This positions A2-FusionRS as an
-interpretable fusion that is competitive with strong static fusion, not as a
-mechanism that supersedes it — a distinction that recent interpretable-recommendation
-work also foregrounds (Wu et al., 2024; Kim et al., 2024).
+If a static fuser with the same PyABSA features is already competitive, the natural
+question is whether the attention mechanism earns its added complexity. On raw accuracy,
+the honest and firm answer is that it *matches* rather than beats the static fusion, and
+we resist any stronger claim. Comparing A2-FusionRS directly to the static PyABSA control,
+attention is behind on Amazon (+0.0034 RMSE), marginally ahead on Restaurant (−0.0011) and
+effectively level on Hotel (−0.0005). The per-seed picture tells the same story without
+rounding: attention-gated fusion is ahead of the static control in 1 of 5 seeds on Amazon,
+4 of 5 on Restaurant, and 3 of 5 on Hotel — 8 of 15 domain–seed cells in total, a near
+coin-flip. No configuration of this comparison supports an accuracy advantage for the
+attention mechanism, and we do not assert one.
+
+Its value lies elsewhere, and there it is concrete. First, attention reaches this accuracy
+while *learning* the aspect aggregation end-to-end from the raw variable-length per-aspect
+tuples, whereas the static control only becomes competitive once it is given the nine
+hand-engineered order-statistics we designed to summarize those same aspects; parity
+without feature engineering is a methodological, not an accuracy, advantage, but it is a
+real one. Second, the mechanism yields per-modality gate weights and per-aspect attention
+that the tree does not, and — unlike a decorative heatmap — these attributions survive a
+faithfulness test (Section 6.5). We therefore position A2-FusionRS as an interpretable
+fusion that is competitive with strong static fusion, in the spirit of recent work that
+treats interpretability as a first-class design goal rather than a by-product
+(Wu et al., 2024; Kim et al., 2024), and not as a fusion operator that supersedes the
+static baseline.
 
 ### 6.4 When does model-based ABSA help? (RQ3)
 
-The benefit of the PyABSA modality is not uniform across domains, and its variation is
-mechanistically informative. The RMSE reduction of the PyABSA control over A2-IRM is
-largest where keyword-ABSA coverage is lowest — −0.0133 on Amazon (45.1% coverage),
-−0.0115 on Restaurant (87.7%), and −0.0090 on Hotel (95.9%). In other words, the
-open-vocabulary encoder contributes most where the fixed-taxonomy encoder is weakest,
-which is exactly where a complementary aspect signal should matter most. This
-coverage-dependent behavior offers practical guidance: model-based ABSA is most worth its
-cost in domains with sparse or ill-fitting aspect taxonomies (Ou et al., 2024;
-Yang et al., 2024).
+The benefit of the PyABSA modality is not uniform across domains, and the pattern of its
+variation is itself a finding. Ordering the domains by keyword-ABSA coverage, the RMSE
+reduction of the PyABSA control over A2-IRM decreases monotonically: −0.0133 at 45.1%
+coverage (Amazon), −0.0115 at 87.7% (Restaurant), and −0.0090 at 95.9% (Hotel). The
+open-vocabulary encoder contributes most where the fixed-taxonomy encoder covers the
+fewest reviews — exactly where a complementary aspect signal has the most room to add
+information, and least where keyword matching already captures nearly every review. With
+three domains this is a directional trend rather than a law, and we frame it as such; but
+it is a mechanistically sensible one, and it yields actionable guidance: model-based ABSA
+is most worth its added cost in domains whose aspect vocabulary is sparse or poorly served
+by a fixed taxonomy, and least worth it where a lightweight keyword encoder already
+saturates coverage. This complements the broader evidence that fine-grained aspect signals
+improve review-based recommendation (Ou & Huynh, 2024; Yang et al., 2024a) by specifying a
+condition under which the more expensive model-based encoder pays off.
 
 ### 6.5 Interpretability
 
