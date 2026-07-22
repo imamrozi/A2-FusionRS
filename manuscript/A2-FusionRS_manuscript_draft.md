@@ -8,6 +8,179 @@
 
 ---
 
+## 1. Introduction
+
+Online platforms now mediate most consumer choices through recommendation, and the
+ratings they collect are the classical signal for learning user preferences. That signal,
+however, is chronically thin: the user–item interaction matrix is extremely sparse, and
+newly arrived users and items carry little or no history, so purely rating-based
+collaborative filtering degrades badly under the sparsity and cold-start conditions that
+dominate real catalogs (Idrissi & Zellou, 2020; Yuan & Hernandez, 2023). A large body of
+work therefore turns to the free-text reviews that accompany ratings, which describe *why*
+a user liked an item and expose preferences a single star rating cannot (Duan et al.,
+2022; Elahi et al., 2023).
+
+Among review signals, aspect-based sentiment analysis (ABSA) is especially attractive
+because it decomposes an opinion into sentiments toward specific aspects — a restaurant's
+*service* or *ambiance*, a product's *battery* or *screen* — rather than collapsing a
+review into a single polarity. Aspect-level preference modeling has repeatedly improved
+rating prediction and top-N recommendation over rating-only and document-level-sentiment
+methods (Cai et al., 2022; Kim et al., 2024; Yang et al., 2024b). It also helps precisely
+where ratings are least reliable: reviewers frequently assign a high star rating while
+voicing aspect-level dissatisfaction, an inconsistency that aspect sentiment can surface
+and correct (Aramanda et al., 2023; Rabiu et al., 2022).
+
+Despite this progress, two gaps motivate the present work. **First**, the aspect signal
+itself is usually extracted with a *fixed taxonomy* — a handful of predefined categories
+matched by keywords — whose coverage varies sharply across domains and collapses when an
+aspect vocabulary is open-ended. Open-vocabulary, model-based ABSA can extract aspects a
+fixed taxonomy never anticipates, but it produces a *variable-length, per-review set* of
+aspects that is awkward to fuse with the fixed-width features recommenders expect, and it
+is unclear when its additional cost is repaid. **Second**, and more consequential for the
+field, when an aspect signal *does* improve a recommender, the improvement is seldom
+attributed: papers typically introduce a new architecture together with a new signal and
+report a net gain, leaving open whether the architecture or the signal did the work. A
+recommender that is credited to its attention mechanism, but would perform identically
+with a simple fuser given the same features, has been mis-attributed — and the field's
+running assumption that more elaborate fusion is the source of gains goes largely
+untested.
+
+This paper studies both gaps in one system. We build on A2-IRM, a static-fusion hybrid
+that combines deep matrix factorization, content-based clustering, and keyword-ABSA
+through a non-negative-matrix-factorization and decision-tree fuser, in the lineage of
+Darraz et al. (2025). We extend it into **A2-FusionRS**, which (i) adds open-vocabulary
+model-based ABSA (PyABSA; Yang & Li, 2023) as a complementary modality, summarized by a
+learned *aspect-sequence pooling* layer that preserves aspect identity instead of
+averaging it away, and (ii) fuses the modalities with an attention-gated mechanism whose
+weights are interpretable. Crucially, we pair the model with an *attribution protocol*
+that toggles the architecture and the signal independently, so that the source of any gain
+is identified rather than assumed.
+
+Our contributions are:
+
+1. **A2-FusionRS**, an attention-gated fusion recommender that integrates model-based
+   per-aspect sentiment as a complementary modality through a learned aspect-sequence
+   pooling layer, and that improves significantly over a strong prior hybrid (A2-IRM) and
+   over classical and neural collaborative baselines across three domains and five seeds.
+2. **An attribution study** that separates the effect of the fusion architecture from the
+   effect of the added signal. Through component ablations and a control that fuses the
+   same model-based aspect features with a static tree, we show the improvement is
+   attributable to the aspect modality, and that the attention mechanism *matches* rather
+   than beats the static fusion on accuracy — a deliberately falsifiable result that
+   corrects a common mis-attribution.
+3. **A coverage-dependence finding**: the benefit of model-based ABSA grows as the
+   fixed-taxonomy keyword coverage of a domain falls, giving practical guidance on when the
+   costlier encoder is worth adopting.
+4. **A validated interpretability analysis**: we expose per-modality and per-aspect
+   attributions and test the latter with a perturbation study, showing the aspect attention
+   is faithful in the aggregate rather than merely displayed — and we report its limits
+   honestly.
+
+We organize the study around three questions. **RQ1**: does A2-FusionRS improve rating
+prediction over classical, neural, and hybrid baselines across domains? **RQ2**: when it
+improves, is the gain due to the model-based aspect signal or to the attention fusion?
+**RQ3**: under what domain conditions does model-based ABSA help most? Section 2 reviews
+related work; Section 3 formalizes the task; Section 4 details A2-FusionRS; Section 5
+describes the experimental setup; Section 6 reports and discusses results; Section 7
+concludes.
+
+---
+
+## 2. Related Work
+
+### 2.1 Collaborative filtering and neural recommendation
+
+Matrix factorization remains the backbone of rating prediction, mapping users and items to
+latent factors whose inner product estimates a rating (Koren et al., 2009). Neural
+extensions replace or augment the inner product with learned interaction functions:
+Neural Collaborative Filtering combines generalized matrix factorization with a multilayer
+perceptron (He et al., 2017), and DeepFM couples a factorization machine with a deep
+network to capture low- and high-order feature interactions (Guo et al., 2017). These
+models are strong when interactions are dense, but their reliance on the interaction
+signal alone makes them vulnerable to the sparsity and cold-start regimes that characterize
+review platforms (Idrissi & Zellou, 2020; Yuan & Hernandez, 2023) — a vulnerability our
+experiments quantify directly, where such models barely exceed a constant-mean predictor.
+
+### 2.2 Review-aware and content-based recommendation
+
+To compensate for thin ratings, a substantial line of work mines the accompanying review
+text. Early hybrids inject document-level sentiment or topic features into a factorization
+model (Elahi et al., 2023; Lai & Hsu, 2021), while later methods learn joint
+representations of reviews and ratings (Cai et al., 2022; Duan et al., 2022) or add further
+modalities such as product images (Zhan & Xu, 2023). A recurring theme is that reviews
+mitigate sparsity and cold-start: review-based collaborative filtering and matrix
+factorization have been combined explicitly to address rating sparsity (Duan et al.,
+2022), and stacked-autoencoder and ensemble models exploit reviews for top-N
+recommendation on sparse corpora (Abinaya & Devi, 2021; Choudhary et al., 2023).
+Transformer language models have further sharpened the text representation, with BERT
+embeddings of reviews feeding hybrid recommenders in the immediate lineage of the present
+work (Karabila et al., 2023, 2025). These methods establish that the review channel is
+valuable; they largely treat sentiment at the document or sentence level, however, leaving
+the finer aspect structure underused.
+
+### 2.3 Aspect-based sentiment for recommendation
+
+A finer-grained strand extracts aspect-level sentiment and feeds it to the recommender.
+Approaches range from clustering users by aspect sentiment (Poudel & Bikdash, 2022) and
+attention over aspect terms (Lai et al., 2021; Yang et al., 2024b), to aspect-aware graph
+neural networks (Zhang et al., 2023), knowledge-graph models driven by review sentiment
+(Cui et al., 2024), variational aspect-level models (Ou & Huynh, 2024), and, most recently,
+LLM-based aspect extraction (Liu et al., 2025). Several report that aspect-level signals
+outperform overall-sentiment baselines (Kim et al., 2024; Yang et al., 2024a). Two
+limitations persist. Most systems still derive aspects from a fixed taxonomy or a
+domain-specific list, so their coverage is domain-bound; and where an open-vocabulary
+extractor is used, its variable-length aspect set is typically reduced by averaging or
+simple pooling, which discards the polarity contrast *between* aspects. Model-based ABSA
+toolkits such as PyABSA (Yang & Li, 2023) make open-vocabulary extraction practical, but
+how best to represent their per-aspect output for a recommender — and when the extra cost
+is justified — remains open. A2-FusionRS addresses the representation question with a
+learned aspect-sequence pooling that keeps aspect identity, and the cost question with the
+coverage-dependence analysis of Section 6.4.
+
+### 2.4 Attention and multimodal fusion in recommendation
+
+Attention (Vaswani et al., 2017) and gating are now standard for combining heterogeneous
+recommendation signals, weighting words, aspects, or modalities by learned importance
+(Lai et al., 2021; Yang et al., 2024b). Multi-aspect models fuse several aspect views
+through routing or graph aggregation (Zhang et al., 2023), and transformer text encoders
+are routinely bolted onto collaborative backbones (Devlin et al., 2019; Karabila et al.,
+2023). This literature convincingly demonstrates that attention-based fusion *can* match
+or exceed simpler combiners; what it rarely does is isolate the fusion mechanism's
+contribution from that of the signals it fuses. Because new architectures and new signals
+are usually introduced together, the community's implicit attribution of gains to the
+fusion mechanism has seldom been tested against a same-signal control — the gap our
+attribution protocol is designed to close.
+
+### 2.5 Explainable and interpretable recommendation
+
+Interest in *why* a recommendation is made has grown alongside accuracy, and reviews are a
+natural source of explanations. Recent systems attach aspect- or word-level attributions
+to their predictions (Kim et al., 2024; Wu et al., 2024), reconstruct explanatory factors
+in a factorization model (Chang et al., 2024), or survey the broader space of explainable
+recommenders (Tiwary et al., 2024). A caution from the NLP literature applies throughout:
+attention weights are not automatically faithful explanations, and treating an attention
+heatmap as proof of what a model used is unsafe without a faithfulness test (Jain &
+Wallace, 2019; Wiegreffe & Pinter, 2019). We take this caution seriously, validating our
+aspect attributions with a perturbation study (Section 6.5) rather than presenting them as
+self-evident.
+
+### 2.6 Positioning
+
+Across these strands, two things are largely missing and together define our contribution.
+First, when a review or aspect signal improves a recommender, the improvement is rarely
+*attributed* to a source through a same-signal, different-architecture control; the
+prevailing assumption that elaborate fusion drives gains is mostly untested. Second, the
+value of open-vocabulary model-based ABSA is seldom analyzed as a function of a domain's
+existing aspect coverage, so there is little guidance on when it is worth its cost.
+A2-FusionRS is built to address both: it introduces model-based per-aspect sentiment as a
+complementary modality with an identity-preserving pooling layer, but it is accompanied by
+an attribution protocol that credits the resulting gain to the signal rather than the
+architecture, a coverage-dependence analysis that says when the signal helps, and a
+faithfulness-tested interpretability account. The result is a system that improves over
+strong baselines *and* an honest account of why.
+
+---
+
 ## 3. Preliminaries and Problem Formulation
 
 ### 3.1 Notation and task
