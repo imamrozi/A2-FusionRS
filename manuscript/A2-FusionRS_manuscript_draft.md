@@ -31,7 +31,7 @@ rating scale.
 ### 3.2 Modality signals
 
 A2-FusionRS draws on three complementary views of each interaction, reused from the
-A2-IRM baseline [REF: A2-IRM / prior work] and extended here:
+A2-IRM baseline (the authors' prior work — citation to be added) and extended here:
 
 - **Collaborative (DeepMF).** A deep matrix-factorization model over user/item
   embeddings captures latent collaborative structure and yields a rating estimate
@@ -91,9 +91,9 @@ vector $\mathbf{v}^{\mathrm{kw}}_{ui}\in\mathbb{R}^{K}$ over $K$ predefined aspe
 categories, projected to the token
 $\mathbf{t}^{\mathrm{kw}}_{ui}=\mathbf{W}_{\mathrm{kw}}\mathbf{v}^{\mathrm{kw}}_{ui}+\mathbf{b}_{\mathrm{kw}}$.
 
-**Model-based per-aspect set.** The open-vocabulary encoder (PyABSA, ATEPC
-checkpoint [REF: PyABSA/ATEPC]) extracts, for each review, a variable-length set of
-$m_{ui}$ aspect tuples
+**Model-based per-aspect set.** The open-vocabulary encoder extracts, for each
+review, a variable-length set of
+$m_{ui}$ aspect tuples (PyABSA, ATEPC checkpoint; Yang & Li, 2023)
 
 $$
 \mathcal{A}_{ui}=\bigl\{(a_j,\;p^{\mathrm{neg}}_j,\;p^{\mathrm{neu}}_j,\;p^{\mathrm{pos}}_j,\;c_j)\bigr\}_{j=1}^{m_{ui}},
@@ -105,7 +105,7 @@ its predicted polarity distribution, and $c_j$ the model confidence. Because $m_
 varies and the aspect vocabulary is open, this set cannot be mapped to a fixed set of
 columns without discarding information; averaging across aspects, in particular,
 destroys the polarity contrast *between* aspects — the same failure mode observed for
-mean-pooled sentiment in A2-IRM [REF: A2-IRM]. We therefore summarize $\mathcal{A}_{ui}$
+mean-pooled sentiment in A2-IRM (the authors' prior work). We therefore summarize $\mathcal{A}_{ui}$
 with a learned attention pooling that preserves aspect identity.
 
 **Aspect-sequence pooling.** Each aspect term is mapped to a learned embedding
@@ -227,4 +227,4 @@ these attributions describe the *refinement* the fusion adds over the static bas
 rather than the entire prediction — a distinction we keep explicit in the analysis.
 Section 6.5 tests whether the aspect attention is faithful (i.e., whether the
 most-attended aspect actually drives the prediction) using a perturbation study, since
-attention weights are not automatically faithful explanations [REF: Jain & Wallace 2019; Wiegreffe & Pinter 2019].
+attention weights are not automatically faithful explanations (Jain & Wallace, 2019; Wiegreffe & Pinter, 2019).
