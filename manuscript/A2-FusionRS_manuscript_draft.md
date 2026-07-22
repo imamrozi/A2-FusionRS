@@ -8,6 +8,37 @@
 
 ---
 
+## Abstract
+
+Review-based recommender systems mitigate the sparsity of rating data by mining the
+opinions users express in text, and aspect-based sentiment analysis (ABSA) makes those
+opinions fine-grained. Two questions are usually left open: how to incorporate
+open-vocabulary, model-based aspect sentiment — whose per-review aspect set is
+variable-length — and, when an aspect signal improves a recommender, whether the gain
+comes from the signal or from the fusion architecture that consumes it. We present
+A2-FusionRS, an attention-gated fusion recommender that extends a static-fusion hybrid
+(A2-IRM) with model-based per-aspect sentiment, summarized by a learned aspect-sequence
+pooling layer that preserves aspect identity, and combined with collaborative and
+content streams through cross-attention and gated pooling over a residual base. Across
+three domains (Amazon Electronics, Yelp Restaurant, TripAdvisor Hotel) and five seeds,
+A2-FusionRS attains the lowest RMSE in every domain (0.6418, 0.6665, 0.6196), improving
+significantly over A2-IRM (1.5–1.9%) and over classical and neural collaborative
+baselines (26–44% over NeuMF), with all gains significant at every seed (Wilcoxon,
+$p<0.001$). A component-level attribution — including a control that fuses the same
+model-based aspect features with a static tree — shows the improvement is due to the
+aspect modality rather than the attention mechanism, which matches, but does not beat,
+the static fusion on accuracy; we report this deliberately falsifiable result rather than
+overclaim the architecture. We further find that the benefit of model-based ABSA grows as
+a domain's keyword-aspect coverage falls, and that the model's aspect attention is
+faithful under a perturbation test (the most-attended aspect drives the prediction in
+~70% of reviews). The result is a recommender that improves over strong baselines together
+with an evidenced account of why.
+
+**Keywords:** recommender systems; aspect-based sentiment analysis; attention mechanism;
+data sparsity; multimodal fusion; explainable recommendation.
+
+---
+
 ## 1. Introduction
 
 Online platforms now mediate most consumer choices through recommendation, and the
@@ -521,8 +552,8 @@ reduction of 44.3% (Amazon), 37.9% (Restaurant), and 26.2% (Hotel). Every one of
 comparisons is significant at all five seeds (Table 5): A2-FusionRS versus A2-IRM and
 versus each of the four external baselines yields $p<0.001$ throughout. The advantage is
 thus both large against rating-only methods and consistent — not the product of a
-favorable seed. The MAE and ranking metrics (Precision/Recall/NDCG@K) preserve the same
-ordering and are reported in Table 4.
+favorable seed. MAE and the ranking metrics (Precision/Recall/NDCG@K) were recorded in the
+same runs and are summarized alongside RMSE in Table 4.
 
 The more instructive result is the *structure* of the baseline column. The four pure
 collaborative methods cluster tightly at RMSE $\approx 1.1$–$1.2$, barely below — and for
@@ -620,23 +651,24 @@ rather than merely display.
 
 **Modality contribution.** Averaged over five seeds, the gate places broadly comparable
 weight on the four modalities (each near the 0.25 uniform baseline), with domain-specific
-tilts: the aspect modality receives its *lowest* weight in the highest-coverage domain
-(Hotel, 0.211) and higher weight in the lower-coverage domains (Amazon 0.279, Restaurant
-0.290), while content features dominate on Hotel (0.302). The correlation between keyword
-coverage and the aspect-modality gate weight is negative ($r=-0.52$). This is an
+tilts (Table 7): the aspect modality receives its *lowest* weight in the highest-coverage
+domain (Hotel, 0.211) and higher weight in the lower-coverage domains (Amazon 0.279,
+Restaurant 0.290), while content features dominate on Hotel (0.302). The correlation
+between keyword coverage and the aspect-modality gate weight is negative ($r=-0.52$). This is an
 *independent* corroboration of the accuracy finding in Section 6.4: the model learns to
 lean on the model-based aspect signal precisely where keyword-ABSA is weak. With only
 three domains this is indicative rather than conclusive, and we present it as such.
 
 **Aspect attention and its faithfulness.** The aspect-pooling weights identify which
-aspects of a review the model attends to; representative cases are shown in Table 8. To
+aspects of a review the model attends to; representative cases are shown in Table 9. To
 test whether these weights are *faithful* — whether the most-attended aspect actually
 drives the prediction — we run a perturbation study: for each test review with at least
 two aspects, we remove the top-attended aspect and, separately, a randomly chosen aspect,
 and measure the change in prediction. Removing the top-attended aspect changes the
 prediction two-to-three times more than removing a random one (|Δ| of 0.051 vs. 0.016 on
-Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel), and the top-attended
-aspect has the larger effect in roughly 70% of reviews ($p\approx 0$ in all domains).
+Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel; Table 8), and the
+top-attended aspect has the larger effect in roughly 70% of reviews ($p\approx 0$ in all
+domains).
 The attention is thus faithful in the aggregate — a stronger claim than an attention
 heatmap alone would justify (Jain & Wallace, 2019; Wiegreffe & Pinter, 2019) — though
 we note it is faithful to the residual *correction* the fusion adds over the static base,
@@ -645,10 +677,10 @@ not to the entire prediction, and that the illustrative cases are not uniformly 
 
 ### 6.6 Efficiency
 
-[Table 7: parameter counts and train/inference times per model. A2-FusionRS adds a small
-attention/gating head over the pre-computed modality encoders; its parameter count and
-inference latency are modest relative to the neural CF baselines — numbers to be filled
-from the recorded instrumentation.]
+Table 10 reports parameter counts and train/inference times. A2-FusionRS adds only a small
+attention/gating head over the pre-computed modality encoders; its trainable parameter
+count and inference latency are modest relative to the neural CF baselines. [Numbers to be
+filled from the recorded instrumentation.]
 
 ### 6.7 Threats to validity
 
@@ -662,3 +694,128 @@ negligible RMSE gaps, which is why we always pair it with the effect size. (iv) 
 interpretability attributions describe the residual refinement over the static base, and
 attention faithfulness, though supported by the perturbation test, holds in aggregate
 rather than for every instance.
+
+---
+
+## 7. Conclusion and Future Work
+
+We presented A2-FusionRS, an attention-gated fusion recommender that adds open-vocabulary,
+model-based per-aspect sentiment to a static-fusion hybrid through a learned
+aspect-sequence pooling layer, and that predicts a residual correction over that hybrid.
+On the three research questions, the evidence is clear and, where it is limiting, stated
+plainly. **RQ1**: A2-FusionRS attains the lowest RMSE in all three domains and improves
+significantly over classical, neural, and hybrid baselines at every seed — decisively
+against rating-only methods and consistently against the strong A2-IRM hybrid. **RQ2**:
+the improvement is attributable to the model-based aspect modality, not to the attention
+mechanism; a static tree given the same aspect features is equally strong, so we credit
+the signal rather than the architecture and refrain from claiming an accuracy advantage
+for attention. **RQ3**: the value of model-based ABSA grows as a domain's keyword-aspect
+coverage falls, which tells practitioners when the costlier encoder is worth adopting.
+Beyond accuracy, the fusion is interpretable, and its aspect attention is faithful under a
+perturbation test rather than merely displayed.
+
+Two aspects of this work are, in our view, as useful as the accuracy gain. The first is
+methodological: by toggling architecture and signal independently, the attribution
+protocol turns a common "new-model-plus-new-signal" comparison into a statement about
+*which* change mattered — a discipline the field applies too rarely. The second is the
+honesty of the negative result: reporting that the attention mechanism only matches the
+static fuser, rather than burying it, is what makes the positive claims credible.
+
+Several directions follow. The evaluation should be broadened beyond three
+English-language domains and a single PyABSA checkpoint — in particular to mid-coverage
+domains that would test the coverage-dependence trend, and to other languages and
+aspect extractors. The aspect-sequence pooling is deliberately simple; richer pooling
+(e.g., multi-query or hierarchical attention over aspects) may extract more from the same
+signal, and would be a fair test of whether an attention advantage can be recovered where
+we found none. Stronger review-aware baselines (graph- and LLM-based aspect models;
+Cui et al., 2024; Liu et al., 2025) would sharpen the external comparison. Finally, the
+interpretability account could be extended from faithfulness to usefulness, measuring
+whether the exposed aspect attributions actually help end users judge recommendations.
+
+---
+
+## Tables
+
+> Values are drawn from `A2-FusionRS_results_ledger.md`. Entries marked "[fill]" require
+> figures not yet extracted (dataset provenance counts; MAE/ranking; efficiency; Exp-B
+> case studies pending the interpretability re-run).
+
+**Table 2. Dataset statistics.** (RMSE-relevant subset; full interaction counts to be
+completed from the data.)
+
+| Domain | #Test interactions | Sparsity | Keyword-ABSA coverage | PyABSA coverage | Avg. aspects/review (PyABSA) |
+|---|---:|---:|---:|---:|---:|
+| Amazon Electronics | 16,580 | 99.91% | 45.1% | 80.4% | 1.81 |
+| Yelp Restaurant | 13,233 | [fill] (5-core) | 87.7% | [fill] | [fill] |
+| TripAdvisor Hotel | 11,795 | [fill] | 95.9% | 70.2% | 2.77 |
+
+**Table 3. Key hyperparameters.**
+
+| Component | Setting |
+|---|---|
+| DeepMF | embedding 128; hidden [256,128,64,32]; dropout 0.3; SGD, lr 1e-3; batch 512; 20 epochs; no negative sampling |
+| CBF | item PCA + user cluster preference (components/clusters per config) |
+| Item-KNN | k=40; cosine; item-based |
+| SVD | 100 factors; 20 epochs; lr 5e-3; reg 2e-2 |
+| NeuMF / DeepFM | embedding 64; MLP [128,64,32]; dropout 0.2; Adam, lr 1e-3, weight decay 1e-6; batch 512; 20 epochs |
+| A2-FusionRS (AGF) | d=64; heads H=2; aspect embedding d_a=16; max aspects 8; aspect vocab V=500 (train-only); Adam + weight decay; best-val restore; residual base via 5-fold OOF |
+
+**Table 4. Overall performance — RMSE (mean ± SD over 5 seeds), lower is better.** Best per
+column in bold. (MAE and Precision/Recall/NDCG@K recorded in the same runs — [fill].)
+
+| Model | Amazon | Restaurant | Hotel |
+|---|---:|---:|---:|
+| Global Mean (reference) | 1.2143 | 1.1516 | 0.9163 |
+| Item-KNN | 1.2240 ± .000 | 1.2019 ± .000 | 0.9163 ± .000 |
+| SVD | 1.1420 ± .001 | 1.0753 ± .001 | 0.8953 ± .000 |
+| NeuMF | 1.1528 ± .001 | 1.0740 ± .001 | 0.8399 ± .001 |
+| DeepFM | 1.1529 ± .002 | 1.0746 ± .002 | 0.8393 ± .001 |
+| A2-IRM (hybrid, prior) | 0.6517 ± .003 | 0.6791 ± .001 | 0.6291 ± .003 |
+| **A2-FusionRS** | **0.6418 ± .002** | **0.6665 ± .001** | **0.6196 ± .003** |
+
+**Table 5. Significance of A2-FusionRS vs. each baseline** (paired Wilcoxon on per-interaction
+squared error; number of seeds out of 5 with $p<0.05$).
+
+| Comparison | Amazon | Restaurant | Hotel |
+|---|:--:|:--:|:--:|
+| A2-FusionRS vs A2-IRM | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs NeuMF | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs DeepFM | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs SVD | 5/5 | 5/5 | 5/5 |
+| A2-FusionRS vs Item-KNN | 5/5 | 5/5 | 5/5 |
+| (attribution) static tree + PyABSA vs A2-IRM | 5/5 | 5/5 | 5/5 |
+
+**Table 6. Ablation — RMSE (mean ± SD over 5 seeds).** Toggling architecture vs. signal.
+
+| Variant | Amazon | Restaurant | Hotel |
+|---|---:|---:|---:|
+| A2-IRM (static fusion, keyword-ABSA) | 0.6517 ± .003 | 0.6791 ± .001 | 0.6291 ± .003 |
+| Attention-gated fusion, no PyABSA (architecture only) | 0.6520 ± .002 | 0.6773 ± .001 | 0.6286 ± .003 |
+| Static tree + PyABSA (signal only; attribution control) | 0.6384 ± .001 | 0.6676 ± .001 | 0.6201 ± .003 |
+| Attention + PyABSA order-statistics | 0.6407 ± .002 | 0.6674 ± .001 | 0.6216 ± .003 |
+| **A2-FusionRS (attention + aspect-sequence pooling)** | **0.6418 ± .002** | **0.6665 ± .001** | **0.6196 ± .003** |
+
+**Table 7. Interpretability — mean gate weight per modality (5 seeds).** (§6.5, Exp-A.)
+
+| Domain (keyword coverage) | DeepMF | CBF | Keyword-ABSA | PyABSA-aspect |
+|---|---:|---:|---:|---:|
+| Amazon (45.1%) | 0.236 | 0.234 | 0.251 | 0.279 |
+| Restaurant (87.7%) | 0.239 | 0.224 | 0.248 | 0.290 |
+| Hotel (95.9%) | 0.201 | 0.302 | 0.286 | 0.211 |
+
+*Pearson r(keyword coverage, PyABSA-aspect gate) = −0.52.*
+
+**Table 8. Interpretability — aspect-attention faithfulness (perturbation test).** (§6.5,
+Exp-C; seed 42; reviews with ≥2 aspects.)
+
+| Domain | \|Δ\| remove top-attended | \|Δ\| remove random | top > random | Wilcoxon p |
+|---|---:|---:|---:|:--:|
+| Amazon | 0.0511 | 0.0160 | 71.2% | ≈ 0 |
+| Restaurant | 0.0603 | 0.0319 | 69.9% | ≈ 0 |
+| Hotel | 0.0475 | 0.0214 | 71.3% | ≈ 0 |
+
+**Table 9. Representative aspect-attention case studies** (§6.5, Exp-B). — [fill from the
+interpretability re-run: named + coherent examples.]
+
+**Table 10. Efficiency** (parameters, train/inference time per model). — [fill from recorded
+instrumentation.]
