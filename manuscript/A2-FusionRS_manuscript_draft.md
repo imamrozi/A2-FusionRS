@@ -842,6 +842,42 @@ Zhang, C., Xue, S., Li, J., Wu, J., Du, B., Liu, D., Chang, J., 2023. Multi-aspe
 
 ---
 
+## Figure Captions
+
+**Fig. 1.** Overall architecture of the proposed A2-FusionRS. The collaborative (DeepMF) and
+content (CBF) streams contribute calibrated scalar predictions, whereas the sentiment stream
+is kept rich: keyword-ABSA as a confidence-weighted vector and open-vocabulary PyABSA as a
+variable-length per-aspect sequence pooled by a learned masked query-attention. The four
+projected tokens are gathered on a shared bus into multi-head cross-attention and merged by a
+softmax gate; a small head emits an additive correction over the static A2-IRM base — itself
+fused from the DeepMF, CBF, and keyword-ABSA signals — giving the residual prediction
+$\hat r = \hat r^{\mathrm{base}} + \Delta$, $\Delta = \mathrm{Head}(\sum_k \alpha_k\,\mathrm{token}_k)$.
+
+**Fig. 2.** RMSE by model and domain (mean over five seeds). The four rating-only
+collaborative methods cluster near RMSE ≈ 1.1 — barely below the per-domain Global Mean and,
+for Item-KNN, at it — whereas the review-aware hybrids A2-IRM and A2-FusionRS drop to ≈ 0.65.
+A2-FusionRS is lowest in every domain. Global-Mean bars are hatched to mark the
+constant-predictor reference.
+
+**Fig. 3.** Coverage-dependence of the model-based-ABSA benefit. Each point is one domain; the
+RMSE reduction from the open-vocabulary encoder is largest where the fixed-taxonomy keyword
+encoder covers the fewest reviews (Amazon, 45.1%) and smallest where coverage saturates
+(Hotel, 95.9%), declining monotonically. The same ordering appears independently in the
+learned gate weights (Section 6.5), where the aspect modality's weight also falls as coverage
+rises ($r=-0.52$).
+
+**Fig. 4.** Interpretability of A2-FusionRS. **(a)** A perturbation test: removing the single
+most-attended aspect from each review changes the prediction two-to-three times more than
+removing a random aspect (|Δ| 0.051 vs. 0.016 on Amazon, 0.060 vs. 0.032 on Restaurant, 0.047
+vs. 0.021 on Hotel; the top-attended aspect has the larger effect in ≈ 70% of reviews,
+$p\approx 0$ in all domains). The attention is therefore faithful in the aggregate rather than
+decorative. **(b)** The learned gate distributes weight across the four modalities; the
+model-based aspect modality receives its highest weight in the lowest-coverage domain (Amazon)
+and its lowest in the highest-coverage domain (Hotel), independently echoing the accuracy trend
+of Fig. 3 ($r=-0.52$ between coverage and aspect-gate weight).
+
+---
+
 ## Tables
 
 > Values are extracted from the run outputs by `build_manuscript_tables.py` and
