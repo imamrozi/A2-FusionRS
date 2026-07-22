@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -70,8 +71,13 @@ def run_one_model(model: str, config: dict, train_df, val_df, test_df) -> None:
     n_users = train_df["user_id"].nunique()
     n_items = train_df["business_id"].nunique()
     trainer = NeuralCFTrainer(n_users, n_items, cfg)
+    t0 = time.time()
     trainer.fit(train_df, val_df, rating_scale)
+    train_time = time.time() - t0
+    t0 = time.time()
     test_preds = trainer.predict(test_df)
+    predict_time = time.time() - t0
+    n_params = int(sum(p.numel() for p in trainer.model.parameters() if p.requires_grad))
 
     # ---------- Evaluasi (identik dengan run_baseline.py tahap 8) ----------
     y_true = test_df["stars"].values
@@ -114,6 +120,9 @@ def run_one_model(model: str, config: dict, train_df, val_df, test_df) -> None:
         "embedding_dim": cfg.embedding_dim,
         "mlp_layers": list(cfg.mlp_layers),
         "epochs": cfg.epochs,
+        "train_time_seconds": train_time,
+        "predict_time_seconds": predict_time,
+        "n_parameters": n_params,
         "notes": (
             "Baseline CF neural eksternal (NeuMF/DeepFM diadaptasi ke regresi "
             "rating), pembanding state-of-the-art A2-FusionRS. Split & protokol "

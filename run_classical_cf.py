@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -73,8 +74,19 @@ def run_one_algorithm(algorithm: str, config: dict, train_df, test_df) -> None:
         raise ValueError(f"algorithm '{algorithm}' tidak dikenal -- gunakan 'item_knn' atau 'svd'")
 
     trainer = ClassicalCFTrainer(cfg)
+    t0 = time.time()
     trainer.fit(train_df, rating_scale)
+    train_time = time.time() - t0
+    t0 = time.time()
     test_preds = trainer.predict(test_df, rating_scale)
+    predict_time = time.time() - t0
+    # Jumlah parameter: SVD punya faktor laten pu/qi + bias bu/bi; Item-KNN
+    # memory-based (tak ada parameter terlatih) -> None.
+    if algorithm == "svd":
+        a = trainer._algo
+        n_params = int(a.pu.size + a.qi.size + a.bu.size + a.bi.size + 1)
+    else:
+        n_params = None
 
     # ---------- Evaluasi (identik dengan run_baseline.py tahap 8) ----------
     y_true = test_df["stars"].values
@@ -124,6 +136,9 @@ def run_one_algorithm(algorithm: str, config: dict, train_df, test_df) -> None:
         "precision_at_k": {int(k): v for k, v in precision_k.items()},
         "recall_at_k": {int(k): v for k, v in recall_k.items()},
         "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
+        "train_time_seconds": train_time,
+        "predict_time_seconds": predict_time,
+        "n_parameters": n_params,
         "notes": (
             "Baseline CF ringan (murni CF, tanpa sentiment/content-based), "
             "TIDAK bagian dari reimplementasi hybrid Darraz et al. Ranking "
