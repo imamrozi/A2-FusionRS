@@ -559,9 +559,10 @@ metrics (Precision/Recall/NDCG@K) are near-saturated under the restricted-candid
 protocol of Section 5.2 — all models score within a narrow band — so they do not
 discriminate between methods, and we treat RMSE and MAE as the informative metrics.
 
-The more instructive result is the *structure* of the baseline column. The four pure
-collaborative methods cluster tightly at RMSE $\approx 1.1$–$1.2$, barely below — and for
-Item-KNN equal to — the Global Mean predictor (1.2143 / 1.1516 / 0.9163). This reference
+The more instructive result is the *structure* of the baseline column, which Fig. 3 makes
+visual. The four pure collaborative methods cluster tightly at RMSE $\approx 1.1$–$1.2$,
+barely below — and for Item-KNN equal to — the Global Mean predictor (1.2143 / 1.1516 /
+0.9163). This reference
 point is not arbitrary: the RMSE of the constant mean predictor equals the standard
 deviation of the test ratings (an algebraic identity), so a model that matches it has
 learned nothing beyond the average rating. On Hotel, Item-KNN's RMSE (0.9163) coincides
@@ -634,8 +635,8 @@ static baseline.
 ### 6.4 When does model-based ABSA help? (RQ3)
 
 The benefit of the PyABSA modality is not uniform across domains, and the pattern of its
-variation is itself a finding. Ordering the domains by keyword-ABSA coverage, the RMSE
-reduction of the PyABSA control over A2-IRM decreases monotonically: −0.0133 at 45.1%
+variation is itself a finding (Fig. 4). Ordering the domains by keyword-ABSA coverage, the
+RMSE reduction of the PyABSA control over A2-IRM decreases monotonically: −0.0133 at 45.1%
 coverage (Amazon), −0.0115 at 87.6% (Restaurant), and −0.0090 at 95.9% (Hotel). The
 open-vocabulary encoder contributes most where the fixed-taxonomy encoder covers the
 fewest reviews — exactly where a complementary aspect signal has the most room to add
