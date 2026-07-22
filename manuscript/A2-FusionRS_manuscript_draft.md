@@ -120,8 +120,10 @@ concludes.
 
 ### 2.1 Collaborative filtering and neural recommendation
 
-Matrix factorization remains the backbone of rating prediction, mapping users and items to
-latent factors whose inner product estimates a rating (Koren et al., 2009). Neural
+The design space of recommender systems is broad and has been surveyed extensively
+(Saifudin & Widiyaningtyas, 2024); we focus on the rating-prediction line most relevant to
+this work. Matrix factorization remains the backbone of rating prediction, mapping users and
+items to latent factors whose inner product estimates a rating (Koren et al., 2009). Neural
 extensions replace or augment the inner product with learned interaction functions:
 Neural Collaborative Filtering combines generalized matrix factorization with a multilayer
 perceptron (He et al., 2017), and DeepFM couples a factorization machine with a deep
@@ -136,8 +138,8 @@ experiments quantify directly, where such models barely exceed a constant-mean p
 To compensate for thin ratings, a substantial line of work mines the accompanying review
 text. Early hybrids inject document-level sentiment or topic features into a factorization
 model (Elahi et al., 2023; Lai & Hsu, 2021), while later methods learn joint
-representations of reviews and ratings (Cai et al., 2022; Duan et al., 2022) or add further
-modalities such as product images (Zhan & Xu, 2023). A recurring theme is that reviews
+representations of reviews and ratings (Cai et al., 2022; Duan et al., 2022; Lai & Peng, 2023)
+or add further modalities such as product images (Zhan & Xu, 2023). A recurring theme is that reviews
 mitigate sparsity and cold-start: review-based collaborative filtering and matrix
 factorization have been combined explicitly to address rating sparsity (Duan et al.,
 2022), and stacked-autoencoder and ensemble models exploit reviews for top-N
@@ -145,8 +147,8 @@ recommendation on sparse corpora (Abinaya & Devi, 2021; Choudhary et al., 2023).
 Transformer language models have further sharpened the text representation, with BERT
 embeddings of reviews feeding hybrid recommenders in the immediate lineage of the present
 work (Karabila et al., 2023, 2025). These methods establish that the review channel is
-valuable; they largely treat sentiment at the document or sentence level, however, leaving
-the finer aspect structure underused.
+valuable; they largely treat sentiment at the document or sentence level (e.g., Yang et al.,
+2021), however, leaving the finer aspect structure underused.
 
 ### 2.3 Aspect-based sentiment for recommendation
 
@@ -201,8 +203,11 @@ First, when a review or aspect signal improves a recommender, the improvement is
 *attributed* to a source through a same-signal, different-architecture control; the
 prevailing assumption that elaborate fusion drives gains is mostly untested. Second, the
 value of open-vocabulary model-based ABSA is seldom analyzed as a function of a domain's
-existing aspect coverage, so there is little guidance on when it is worth its cost.
-A2-FusionRS is built to address both: it introduces model-based per-aspect sentiment as a
+existing aspect coverage, so there is little guidance on when it is worth its cost. Table 1
+positions representative review-aware recommenders on the axes that matter here — the
+aspect vocabulary, the fusion mechanism, whether the gain is attributed through a control,
+and whether interpretability is validated — and locates our contribution against them.
+A2-FusionRS is built to address both gaps: it introduces model-based per-aspect sentiment as a
 complementary modality with an identity-preserving pooling layer, but it is accompanied by
 an attribution protocol that credits the resulting gain to the signal rather than the
 architecture, a coverage-dependence analysis that says when the signal helps, and a
@@ -260,7 +265,7 @@ this work.
 
 ### 4.1 Overview
 
-Figure 2 shows the architecture. A2-FusionRS encodes each interaction into four
+Figure 1 shows the architecture. A2-FusionRS encodes each interaction into four
 modality tokens, contextualizes them with multi-head cross-attention, and combines
 them through a gated pooling layer whose per-modality weights are interpretable. The
 pooled representation drives a small prediction head that outputs an **additive
@@ -559,7 +564,7 @@ metrics (Precision/Recall/NDCG@K) are near-saturated under the restricted-candid
 protocol of Section 5.2 — all models score within a narrow band — so they do not
 discriminate between methods, and we treat RMSE and MAE as the informative metrics.
 
-The more instructive result is the *structure* of the baseline column, which Fig. 3 makes
+The more instructive result is the *structure* of the baseline column, which Fig. 2 makes
 visual. The four pure collaborative methods cluster tightly at RMSE $\approx 1.1$–$1.2$,
 barely below — and for Item-KNN equal to — the Global Mean predictor (1.2143 / 1.1516 /
 0.9163). This reference
@@ -635,7 +640,7 @@ static baseline.
 ### 6.4 When does model-based ABSA help? (RQ3)
 
 The benefit of the PyABSA modality is not uniform across domains, and the pattern of its
-variation is itself a finding (Fig. 4). Ordering the domains by keyword-ABSA coverage, the
+variation is itself a finding (Fig. 3). Ordering the domains by keyword-ABSA coverage, the
 RMSE reduction of the PyABSA control over A2-IRM decreases monotonically: −0.0133 at 45.1%
 coverage (Amazon), −0.0115 at 87.6% (Restaurant), and −0.0090 at 95.9% (Hotel). The
 open-vocabulary encoder contributes most where the fixed-taxonomy encoder covers the
@@ -656,7 +661,7 @@ rather than merely display.
 
 **Modality contribution.** Averaged over five seeds, the gate places broadly comparable
 weight on the four modalities (each near the 0.25 uniform baseline), with domain-specific
-tilts (Table 7, Fig. 5b): the aspect modality receives its *lowest* weight in the highest-coverage
+tilts (Table 7, Fig. 4b): the aspect modality receives its *lowest* weight in the highest-coverage
 domain (Hotel, 0.211) and higher weight in the lower-coverage domains (Amazon 0.279,
 Restaurant 0.290), while content features dominate on Hotel (0.302). The correlation
 between keyword coverage and the aspect-modality gate weight is negative ($r=-0.52$). This is an
@@ -671,7 +676,7 @@ drives the prediction — we run a perturbation study: for each test review with
 two aspects, we remove the top-attended aspect and, separately, a randomly chosen aspect,
 and measure the change in prediction. Removing the top-attended aspect changes the
 prediction two-to-three times more than removing a random one (|Δ| of 0.051 vs. 0.016 on
-Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel; Table 8, Fig. 5a), and the
+Amazon, 0.060 vs. 0.032 on Restaurant, 0.047 vs. 0.021 on Hotel; Table 8, Fig. 4a), and the
 top-attended aspect has the larger effect in roughly 70% of reviews ($p\approx 0$ in all
 domains).
 The attention is thus faithful in the aggregate — a stronger claim than an attention
@@ -753,6 +758,90 @@ whether the exposed aspect attributions actually help end users judge recommenda
 
 ---
 
+## References
+
+Abinaya, S., Devi, M.K.K., 2021. Enhancing Top-N recommendation using stacked autoencoder in context-aware recommender system. Neural Processing Letters 53, 1865–1888. https://doi.org/10.1007/s11063-021-10475-0
+
+Aramanda, A., Md. Abdul, S., Vedala, R., 2023. enemos-p: An enhanced emotion specific prediction for recommender systems. Expert Systems with Applications 227, 120190. https://doi.org/10.1016/j.eswa.2023.120190
+
+Cai, Y., Ke, W., Cui, E., Yu, F., 2022. A deep recommendation model of cross-grained sentiments of user reviews and ratings. Information Processing & Management 59, 102842. https://doi.org/10.1016/j.ipm.2021.102842
+
+Chang, T., Zhang, Z., Cai, X., 2024. Explainable recommender system directed by reconstructed explanatory factors and multi-modal matrix factorization. Concurrency and Computation: Practice and Experience 36, e8208. https://doi.org/10.1002/cpe.8208
+
+Choudhary, C., Singh, I., Kumar, M., 2023. SARWAS: Deep ensemble learning techniques for sentiment based recommendation system. Expert Systems with Applications 216, 119420. https://doi.org/10.1016/j.eswa.2022.119420
+
+Cui, Y., Yu, H., Guo, X., Cao, H., Wang, L., 2024. RAKCR: Reviews sentiment-aware based knowledge graph convolutional networks for personalized recommendation. Expert Systems with Applications 248, 123403. https://doi.org/10.1016/j.eswa.2024.123403
+
+Darraz, N., Karabila, I., El-Ansari, A., Alami, N., El Mallahi, M., 2025. Integrated sentiment analysis with BERT for enhanced hybrid recommendation systems. Expert Systems with Applications 261, 125533. https://doi.org/10.1016/j.eswa.2024.125533
+
+Devlin, J., Chang, M.-W., Lee, K., Toutanova, K., 2019. BERT: Pre-training of deep bidirectional transformers for language understanding. In: Proceedings of NAACL-HLT 2019. Association for Computational Linguistics, pp. 4171–4186. https://doi.org/10.18653/v1/N19-1423
+
+Duan, R., Jiang, C., Jain, H.K., 2022. Combining review-based collaborative filtering and matrix factorization: A solution to rating's sparsity problem. Decision Support Systems 156, 113748. https://doi.org/10.1016/j.dss.2022.113748
+
+Elahi, M., Khosh Kholgh, D., Kiarostami, M.S., Oussalah, M., Saghari, S., 2023. Hybrid recommendation by incorporating the sentiment of product reviews. Information Sciences 625, 738–756. https://doi.org/10.1016/j.ins.2023.01.051
+
+Guo, H., Tang, R., Ye, Y., Li, Z., He, X., 2017. DeepFM: A factorization-machine based neural network for CTR prediction. In: Proceedings of IJCAI 2017, pp. 1725–1731. https://doi.org/10.24963/ijcai.2017/239
+
+He, X., Liao, L., Zhang, H., Nie, L., Hu, X., Chua, T.-S., 2017. Neural collaborative filtering. In: Proceedings of the 26th International Conference on World Wide Web (WWW), pp. 173–182. https://doi.org/10.1145/3038912.3052569
+
+Idrissi, N., Zellou, A., 2020. A systematic literature review of sparsity issues in recommender systems. Social Network Analysis and Mining 10, 15. https://doi.org/10.1007/s13278-020-0626-2
+
+Jain, S., Wallace, B.C., 2019. Attention is not explanation. In: Proceedings of NAACL-HLT 2019. Association for Computational Linguistics, pp. 3543–3556. https://doi.org/10.18653/v1/N19-1357
+
+Karabila, I., Darraz, N., El-Ansari, A., Alami, N., El Mallahi, M., 2023. BERT-enhanced sentiment analysis for personalized e-commerce recommendations. Multimedia Tools and Applications 83, 56463–56488. https://doi.org/10.1007/s11042-023-17689-5
+
+Karabila, I., Darraz, N., El-Ansari, A., Alami, N., El Mallahi, M., 2025. A hybrid approach combining sentiment analysis and deep learning to mitigate data sparsity in recommender systems. Neurocomputing 636, 129886. https://doi.org/10.1016/j.neucom.2025.129886
+
+Kim, D., Li, Q., Jang, D., Kim, J., 2024. AXCF: Aspect-based collaborative filtering for explainable recommendations. Expert Systems 41, e13594. https://doi.org/10.1111/exsy.13594
+
+Koren, Y., Bell, R., Volinsky, C., 2009. Matrix factorization techniques for recommender systems. Computer 42 (8), 30–37. https://doi.org/10.1109/MC.2009.263
+
+Lai, C.-H., Hsu, C.-Y., 2021. Rating prediction based on combination of review mining and user preference analysis. Information Systems 99, 101742. https://doi.org/10.1016/j.is.2021.101742
+
+Lai, C.-H., Liu, D.-R., Lien, K.-S., 2021. A hybrid of XGBoost and aspect-based review mining with attention neural network for user preference prediction. International Journal of Machine Learning and Cybernetics 12, 1203–1217. https://doi.org/10.1007/s13042-020-01229-w
+
+Lai, C.-H., Peng, P.-Y., 2023. A hybrid deep learning method to extract multi-features from reviews and user–item relations for rating prediction. International Journal of Computational Intelligence Systems 16, 109. https://doi.org/10.1007/s44196-023-00288-5
+
+Liu, F., Liu, Y., Chen, H., Cheng, Z., Nie, L., Kankanhalli, M., 2025. Understanding before recommendation: Semantic aspect-aware review exploitation via large language models. ACM Transactions on Information Systems 43, 1–26. https://doi.org/10.1145/3704999
+
+Ni, J., Li, J., McAuley, J., 2019. Justifying recommendations using distantly-labeled reviews and fine-grained aspects. In: Proceedings of EMNLP-IJCNLP 2019. Association for Computational Linguistics, pp. 188–197. https://doi.org/10.18653/v1/D19-1018
+
+Ou, W., Huynh, V.-N., 2024. Aspect-level item recommendation based on user reviews with variational autoencoders. Information Sciences 671, 120655. https://doi.org/10.1016/j.ins.2024.120655
+
+Poudel, S., Bikdash, M., 2022. Collaborative filtering system based on multi-level user clustering and aspect sentiment. Data and Information Management 6, 100021. https://doi.org/10.1016/j.dim.2022.100021
+
+Rabiu, I., Salim, N., Da'u, A., Nasser, M., 2022. Modeling sentimental bias and temporal dynamics for adaptive deep recommendation system. Expert Systems with Applications 191, 116262. https://doi.org/10.1016/j.eswa.2021.116262
+
+Saifudin, I., Widiyaningtyas, T., 2024. Systematic literature review on recommender system: Approach, problem, evaluation techniques, datasets. IEEE Access 12, 19827–19847. https://doi.org/10.1109/ACCESS.2024.3359274
+
+Tiwary, N., Mohd Noah, S.A., Fauzi, F., Yee, T.S., 2024. A review of explainable recommender systems utilizing knowledge graphs and reinforcement learning. IEEE Access 12, 91999–92019. https://doi.org/10.1109/ACCESS.2024.3422416
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.N., Kaiser, Ł., Polosukhin, I., 2017. Attention is all you need. In: Advances in Neural Information Processing Systems 30 (NeurIPS), pp. 5998–6008.
+
+Wang, H., Lu, Y., Zhai, C., 2010. Latent aspect rating analysis on review text data: A rating regression approach. In: Proceedings of KDD 2010, pp. 783–792. https://doi.org/10.1145/1835804.1835903
+
+Wiegreffe, S., Pinter, Y., 2019. Attention is not not explanation. In: Proceedings of EMNLP-IJCNLP 2019. Association for Computational Linguistics, pp. 11–20. https://doi.org/10.18653/v1/D19-1002
+
+Wu, X., Wan, H., Tan, Q., Yao, W., Liu, N., 2024. DIRECT: Dual interpretable recommendation with multi-aspect word attribution. ACM Transactions on Intelligent Systems and Technology 15, 1–21. https://doi.org/10.1145/3663483
+
+Yang, C., Chen, X., Liu, L., Sweetser, P., 2021. Leveraging semantic features for recommendation: Sentence-level emotion analysis. Information Processing & Management 58, 102543. https://doi.org/10.1016/j.ipm.2021.102543
+
+Yang, H., Li, K., 2023. PyABSA: A modularized framework for reproducible aspect-based sentiment analysis. In: Proceedings of CIKM 2023. ACM, pp. 5117–5122. https://doi.org/10.1145/3583780.3614752
+
+Yang, S., Li, Q., Jang, D., Kim, J., 2024a. Deep learning mechanism and big data in hospitality and tourism: Developing a personalized restaurant recommendation model. International Journal of Hospitality Management 121, 103803. https://doi.org/10.1016/j.ijhm.2024.103803
+
+Yang, S., Li, Q., Lim, H., Kim, J., 2024b. An attentive aspect-based recommendation model with deep neural network. IEEE Access 12, 5781–5791. https://doi.org/10.1109/ACCESS.2023.3349291
+
+Yelp, 2024. Yelp Open Dataset. Yelp Inc. https://www.yelp.com/dataset
+
+Yuan, H., Hernandez, A.A., 2023. User cold start problem in recommendation systems: A systematic review. IEEE Access 11, 136958–136977. https://doi.org/10.1109/ACCESS.2023.3338705
+
+Zhan, Z., Xu, B., 2023. Analyzing review sentiments and product images by parallel deep nets for personalized recommendation. Information Processing & Management 60, 103166. https://doi.org/10.1016/j.ipm.2022.103166
+
+Zhang, C., Xue, S., Li, J., Wu, J., Du, B., Liu, D., Chang, J., 2023. Multi-aspect enhanced graph neural networks for recommendation. Neural Networks 157, 90–102. https://doi.org/10.1016/j.neunet.2022.10.001
+
+---
+
 ## Tables
 
 > Values are extracted from the run outputs by `build_manuscript_tables.py` and
@@ -760,6 +849,22 @@ whether the exposed aspect attributions actually help end users judge recommenda
 > figures; the only gap is cross-model efficiency timing (Table 10 reports the
 > A2-FusionRS fusion-head cost, as the baselines were not instrumented under the same
 > harness).
+
+**Table 1. Positioning of A2-FusionRS relative to representative review-aware recommenders.**
+"Aspect vocabulary" is fixed (keyword/taxonomy) or open (model-based); "Attribution" marks
+whether the accuracy gain is credited to a source through a same-signal control;
+"Interpretability" marks whether attributions are provided and, in parentheses, whether they
+are validated (e.g., faithfulness-tested).
+
+| Method | Review signal | Aspect vocabulary | Fusion | Attribution control | Interpretability |
+|---|---|---|---|:--:|---|
+| Cai et al. (2022), DeepCGSR | reviews + ratings | — (cross-grained sentiment) | deep MF mapping | no | no |
+| Zhang et al. (2023), MA-GNN | reviews | fixed (aspect) | routing GNN | no | partial |
+| Cui et al. (2024), RAKCR | reviews + KG | fixed (aspect) | KG-CNN | no | partial |
+| Yang et al. (2024b), AARN | reviews | fixed (ABSA) | attention | no | yes (attention) |
+| Kim et al. (2024), AXCF | reviews | fixed (ABSA) | graph CF | no | yes (aspect) |
+| Darraz et al. (2025), A2-IRM | reviews | fixed (keyword) | NMF + tree (static) | no | limited |
+| **A2-FusionRS (ours)** | reviews | **fixed + open (model-based)** | **attention-gated** | **yes (signal vs. architecture)** | **yes (gate + faithfulness-tested)** |
 
 **Table 2. Dataset statistics.** Coverage measures: fraction of reviews with ≥1 extracted
 aspect (keyword vs. PyABSA); avg. aspects/review from PyABSA.

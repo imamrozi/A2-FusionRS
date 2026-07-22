@@ -1,4 +1,4 @@
-<title>Fig. 3–4 — A2-FusionRS Results</title>
+<title>Fig. 2–3 — A2-FusionRS Results</title>
 <style>
   :root {
     --page:#EEF1F4; --paper:#FFFFFF; --ink:#14181C; --muted:#5A6675; --faint:#8A97A5;
@@ -43,12 +43,12 @@
 
   <!-- FIGURE 3 -->
   <div class="paper">
-    <div class="eyebrow">Figure 3 · Overall performance</div>
+    <div class="eyebrow">Figure 2 · Overall performance</div>
     <h2>Rating-only methods stall near the mean; review-aware fusion breaks through</h2>
     <p class="sub">Test RMSE (lower is better) for every model across the three domains. The shaded band marks the two review-aware hybrids.</p>
     <div class="legend" id="leg3"></div>
     <div class="scroll"><svg id="fig3" viewBox="0 0 880 360" role="img" aria-label="RMSE by model and domain"></svg></div>
-    <figcaption><b>Fig. 3.</b> RMSE by model and domain (mean over five seeds). The four rating-only collaborative
+    <figcaption><b>Fig. 2.</b> RMSE by model and domain (mean over five seeds). The four rating-only collaborative
       methods cluster near RMSE ≈ 1.1 — barely below the per-domain Global Mean and, for Item-KNN, at it —
       whereas the review-aware hybrids A2-IRM and A2-FusionRS drop to ≈ 0.65. A2-FusionRS is lowest in every
       domain. Global-Mean bars are hatched to mark the constant-predictor reference.</figcaption>
@@ -56,11 +56,11 @@
 
   <!-- FIGURE 4 -->
   <div class="paper">
-    <div class="eyebrow">Figure 4 · When model-based ABSA helps</div>
+    <div class="eyebrow">Figure 3 · When model-based ABSA helps</div>
     <h2>The benefit of model-based aspect sentiment scales inversely with keyword coverage</h2>
     <p class="sub">RMSE reduction from adding PyABSA (static tree + PyABSA vs. A2-IRM) against each domain's keyword-ABSA coverage.</p>
     <div class="scroll"><svg id="fig4" viewBox="0 0 620 340" role="img" aria-label="PyABSA benefit vs coverage"></svg></div>
-    <figcaption><b>Fig. 4.</b> Coverage-dependence of the model-based-ABSA benefit. Each point is one domain; the
+    <figcaption><b>Fig. 3.</b> Coverage-dependence of the model-based-ABSA benefit. Each point is one domain; the
       RMSE reduction from the open-vocabulary encoder is largest where the fixed-taxonomy keyword encoder covers
       the fewest reviews (Amazon, 45.1%) and smallest where coverage saturates (Hotel, 95.9%), declining
       monotonically. The same ordering appears independently in the learned gate weights (Section 6.5), where the
