@@ -901,20 +901,18 @@ whether the exposed aspect attributions actually help end users judge recommenda
 
 ## Declarations
 
-> **[AUTHOR ACTION REQUIRED before submission]** The four statements below are Elsevier /
-> ESWA submission requirements. Placeholders are marked `[[ ]]` and must be completed with
-> author-verified information — none of this content should be inferred or fabricated.
+> **[AUTHOR ACTION REMAINING before submission]** Author name(s)/affiliation and the
+> repository URL are still placeholders `[[ ]]`; everything else below is filled with
+> author-confirmed information (2026-07).
 
 **CRediT authorship contribution statement.** `[[Author Name(s)]]`: Conceptualization,
 Methodology, Software, Validation, Formal analysis, Investigation, Data curation,
 Writing – original draft, Writing – review & editing, Visualization. *(Adjust roles to
 match actual contributions if there is more than one author.)*
 
-**Funding.** `[[This work was supported by <funding body / scheme name>, grant number
-<grant number>.]]` *(If this study was produced under the Universitas Merdeka Malang
-2026 internal research scheme mentioned in project records, insert the exact scheme name
-and grant/contract number here — required by the funder and by ESWA's funding
-acknowledgment policy; do not leave blank if funded work.)*
+**Funding.** This work was supported by the Desentralisasi–Matching Fund research scheme
+`[[of <institution name, e.g., Universitas Negeri Malang — confirm exact English name for
+the affiliation line>]]`, grant number 20.4.91/UN32.5.2/LT/2026.
 
 **Declaration of competing interest.** The authors declare that they have no known
 competing financial interests or personal relationships that could have appeared to
@@ -923,8 +921,8 @@ influence the work reported in this paper.
 **Data availability.** The Amazon Electronics, Yelp Open, and TripAdvisor Hotel review
 datasets used in this study are publicly available (see Section 5.1 and the References for
 provenance). Code, configuration files, and the exact train/validation/test splits used
-for evaluation `[[will be made available at <repository URL, e.g., GitHub/Zenodo, to be
-inserted by the author> upon acceptance / are available at <URL> ]]`.
+for evaluation will be made available at `[[repository URL, e.g., GitHub]]` upon
+acceptance.
 
 ---
 
