@@ -16,16 +16,22 @@
 # Satu run gagal TIDAK menghentikan seluruh matriks -- dicatat ke
 # FAILED_RUNS.txt, sisanya tetap lanjut (job 6+ jam, kegagalan 1 run tidak
 # boleh membuang progress run lainnya).
+#
+# RESUMABLE: sebelum menjalankan tiap run, dicek dulu apakah file hasil
+# YAML-nya sudah ada -- kalau ada, DILEWATI (bukan diulang). Aman kalau
+# sesi Colab terputus (idle timeout ~90 menit) -- tinggal jalankan ulang
+# script ini, run yang sudah selesai tidak diulang.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-PY="./venv/Scripts/python.exe"
+PY="python"  # Colab: python3 di PATH sistem, bukan venv/Scripts/python.exe (itu Windows lokal)
+RESULTS_DIR="checkpoints/results"
 SEEDS=(42 123 456 789 1011)
 LOG_DIR="checkpoints/results/logs/cbf_nosentiment_full"
 mkdir -p "$LOG_DIR"
 FAILED_LOG="$LOG_DIR/FAILED_RUNS.txt"
-: > "$FAILED_LOG"
+touch "$FAILED_LOG"  # TIDAK ditruncate -- resumable, riwayat kegagalan sesi sebelumnya dipertahankan
 
 # domain_label:darraz_config
 DARRAZ_CONFIGS=(
@@ -52,10 +58,18 @@ TOTAL=75
 DONE=0
 T0=$(date +%s)
 
+# run_one <label> <expected_output_yaml> <python_args...>
 run_one() {
-  local label="$1"; shift
+  local label="$1"; local expected_out="$2"; shift 2
   local logfile="$LOG_DIR/${label}.log"
-  echo "[$(date '+%H:%M:%S')] MULAI  ($((DONE+1))/$TOTAL): $label"
+
+  if [ -f "$RESULTS_DIR/$expected_out" ]; then
+    echo "[$(date '+%H:%M:%S')] LEWATI  ($((DONE+1))/$TOTAL): $label (hasil sudah ada -- resume)"
+    DONE=$((DONE+1))
+    return
+  fi
+
+  echo "[$(date '+%H:%M:%S')] MULAI   ($((DONE+1))/$TOTAL): $label"
   if "$PY" "$@" > "$logfile" 2>&1; then
     echo "[$(date '+%H:%M:%S')] SELESAI ($((DONE+1))/$TOTAL): $label"
   else
@@ -68,19 +82,29 @@ run_one() {
 for entry in "${DARRAZ_CONFIGS[@]}"; do
   domain="${entry%%:*}"; cfg="${entry#*:}"
   for seed in "${SEEDS[@]}"; do
-    run_one "darraz_reimpl_${domain}_seed${seed}" \
+    out="baseline_reimpl_cbf_nosentiment_${domain}_seed${seed}.yaml"
+    run_one "darraz_reimpl_${domain}_seed${seed}" "$out" \
       run_baseline.py --config "$cfg" --seed "$seed" --no-cbf-sentiment
   done
 done
 
 # ---- 2. 4 mode ABSA x 3 domain x 5 seed = 60 run ----
+# mode_name -> prefix hasil ASLI (lihat mode_meta di run_baseline_absa.py)
+declare -A MODE_PREFIX=(
+  [mean]="absa_ablation"
+  [concat]="absa_ablation_concat"
+  [concat_confidence]="absa_ablation_concat_confidence"
+  [confidence_mean]="absa_ablation_confidence_mean"
+)
+
 for entry in "${ABSA_DOMAINS[@]}"; do
   domain="${entry%%:*}"; cfg_prefix="${entry#*:}"
   for mode_entry in "${ABSA_MODES[@]}"; do
     suffix="${mode_entry%%:*}"; mode_name="${mode_entry#*:}"
     cfg="${cfg_prefix}${suffix}.yaml"
     for seed in "${SEEDS[@]}"; do
-      run_one "absa_${mode_name}_${domain}_seed${seed}" \
+      out="${MODE_PREFIX[$mode_name]}_cbf_nosentiment_${domain}_seed${seed}.yaml"
+      run_one "absa_${mode_name}_${domain}_seed${seed}" "$out" \
         run_baseline_absa.py --config "$cfg" --seed "$seed" --no-cbf-sentiment
     done
   done
