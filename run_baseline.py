@@ -55,7 +55,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(config: dict) -> None:
+def run_pipeline(config: dict, cbf_include_sentiment: bool = True) -> None:
     exp_cfg = config["experiment"]
     data_cfg = config["data"]
     split_cfg = config["split"]
@@ -226,14 +226,16 @@ def run_pipeline(config: dict) -> None:
         k_max=20,
         pca_components=config["cbf_clustering"].get("pca_components", 50),
         random_state=exp_cfg["seed"],
+        include_sentiment=cbf_include_sentiment,
     )
     cbf_predictor = CBFPredictor(cbf_config=cbf_config)
     cbf_predictor.fit(full_df_for_items, train_df)
 
     logger.info(
-        "CBF clustering selesai: K optimal=%d (metode=%s)",
+        "CBF clustering selesai: K optimal=%d (metode=%s, include_sentiment=%s)",
         cbf_predictor.clusterer.best_k,
         cbf_config.method,
+        cbf_include_sentiment,
     )
 
     # ---------- 7. Fusion NMF + DecisionTree ----------
@@ -321,10 +323,25 @@ def run_pipeline(config: dict) -> None:
     # DeepFM, A2-FusionRS, dan varian ablasi) yang akan dijalankan terpisah.
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    results_path = results_dir / f"baseline_reimpl_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
+    results_prefix = "baseline_reimpl"
+    model_name = "baseline_reimplementation_darraz_et_al"
+    notes = (
+        "Ranking metrics dihitung dengan candidate set terbatas pada item "
+        "test set (bukan full-catalog) -- lihat komentar di run_baseline.py"
+    )
+    if not cbf_include_sentiment:
+        # Ablasi CBF-tanpa-sentimen (Invarian #4: file TERPISAH, tidak menimpa
+        # varian asli dgn sentiment_agg -- lihat run_baseline_absa.py utk pola sama).
+        results_prefix += "_cbf_nosentiment"
+        model_name += "_cbf_nosentiment"
+        notes += (
+            " ABLASI TAMBAHAN: CBFConfig(include_sentiment=False) -- sentiment_agg "
+            "(SA global) DIKELUARKAN dari fitur numerik item CBF."
+        )
+    results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
-        "model_name": "baseline_reimplementation_darraz_et_al",
+        "model_name": model_name,
         "domain": exp_cfg["domain"],
         "seed": exp_cfg["seed"],
         "n_test_samples": int(len(test_df)),
@@ -333,10 +350,7 @@ def run_pipeline(config: dict) -> None:
         "precision_at_k": {int(k): v for k, v in precision_k.items()},
         "recall_at_k": {int(k): v for k, v in recall_k.items()},
         "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
-        "notes": (
-            "Ranking metrics dihitung dengan candidate set terbatas pada item "
-            "test set (bukan full-catalog) -- lihat komentar di run_baseline.py"
-        ),
+        "notes": notes,
     }
     save_results_yaml(results_path, results_summary, config=config)
 
@@ -368,9 +382,17 @@ if __name__ == "__main__":
         "tergantung seed ini), cuma tahap 5-8 (DeepMF/CBF/Fusion) yang "
         "benar-benar bervariasi -- jadi run seed tambahan jauh lebih cepat.",
     )
+    parser.add_argument(
+        "--no-cbf-sentiment",
+        action="store_true",
+        help="Ablasi: keluarkan sentiment_agg (SA global) dari fitur numerik "
+        "item CBF (CBFConfig.include_sentiment=False). Default OFF (perilaku "
+        "asli). Hasil disimpan ke file TERPISAH (prefix 'baseline_reimpl_cbf_"
+        "nosentiment'), tidak menimpa hasil varian asli.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     if args.seed is not None:
         cfg["experiment"]["seed"] = args.seed
-    run_pipeline(cfg)
+    run_pipeline(cfg, cbf_include_sentiment=not args.no_cbf_sentiment)

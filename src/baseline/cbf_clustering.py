@@ -42,21 +42,40 @@ class CBFConfig:
     # n_item-1, n_fitur) saat runtime supaya aman untuk subset kecil.
     pca_components: int = 50
     random_state: int = 42
+    # Default True = perilaku ASLI, tidak berubah sama sekali (non-breaking).
+    # False = ablasi: keluarkan sentiment_agg dari fitur numerik item (lihat
+    # ItemFeatureBuilder) -- utk menguji seberapa besar kontribusi sentimen
+    # thd hasil clustering CBF, terpisah dari kontribusinya via stream fusion.
+    include_sentiment: bool = True
 
 
 class ItemFeatureBuilder:
     """Bangun fitur item gabungan: kategori one-hot + TF-IDF + sentimen + popularitas,
     lalu reduksi dimensi dengan PCA sebelum clustering (sesuai Fig. 5 paper)."""
 
-    def __init__(self, tfidf_max_features: int = 500, pca_components: int = 50, random_state: int = 42):
+    def __init__(
+        self,
+        tfidf_max_features: int = 500,
+        pca_components: int = 50,
+        random_state: int = 42,
+        include_sentiment: bool = True,
+    ):
         self.tfidf_max_features = tfidf_max_features
         self.pca_components = pca_components
         self.random_state = random_state
+        self.include_sentiment = include_sentiment
         self.mlb = MultiLabelBinarizer()
         self.tfidf = TfidfVectorizer(max_features=tfidf_max_features)
         self.scaler = StandardScaler()
         self.pca: PCA | None = None
         self._fitted = False
+
+    def _numeric_cols(self) -> list[str]:
+        # include_sentiment=False -> ablasi: sentiment_agg dikeluarkan dari
+        # fitur numerik item CBF (Invarian #9: kebijakan eksplisit, bukan
+        # default tersembunyi -- lihat CBFConfig.include_sentiment).
+        cols = ["review_count", "avg_rating"]
+        return (["sentiment_agg"] + cols) if self.include_sentiment else cols
 
     def _combine_raw_features(self, cat_features, tfidf_features, numeric_features) -> np.ndarray:
         return np.concatenate([cat_features, tfidf_features, numeric_features], axis=1)
@@ -68,6 +87,7 @@ class ItemFeatureBuilder:
         - categories_list: list[str] hasil split business_categories
         - description_text: teks deskripsi/gabungan review untuk TF-IDF
         - sentiment_agg: rata-rata skor sentimen dari REVIEW TRAIN SAJA
+          (diabaikan kalau include_sentiment=False)
         - review_count, avg_rating: metrik popularitas
         """
         cat_features = self.mlb.fit_transform(item_df["categories_list"])
@@ -78,7 +98,7 @@ class ItemFeatureBuilder:
             )
         tfidf_features = self.tfidf.fit_transform(item_df["description_text"]).toarray()
 
-        numeric_cols = ["sentiment_agg", "review_count", "avg_rating"]
+        numeric_cols = self._numeric_cols()
         numeric_features = self.scaler.fit_transform(item_df[numeric_cols].values)
 
         combined = self._combine_raw_features(cat_features, tfidf_features, numeric_features)
@@ -108,7 +128,7 @@ class ItemFeatureBuilder:
             raise RuntimeError("Panggil fit_transform() pada data train dahulu.")
         cat_features = self.mlb.transform(item_df["categories_list"])
         tfidf_features = self.tfidf.transform(item_df["description_text"]).toarray()
-        numeric_cols = ["sentiment_agg", "review_count", "avg_rating"]
+        numeric_cols = self._numeric_cols()
         numeric_features = self.scaler.transform(item_df[numeric_cols].values)
         combined = self._combine_raw_features(cat_features, tfidf_features, numeric_features)
         return self.pca.transform(combined)
@@ -259,6 +279,7 @@ class CBFPredictor:
             tfidf_max_features=tfidf_max_features,
             pca_components=self.cbf_config.pca_components,
             random_state=self.cbf_config.random_state,
+            include_sentiment=self.cbf_config.include_sentiment,
         )
         self.clusterer = ContentBasedClusterer(self.cbf_config)
         self.item_cluster_labels: dict | None = None

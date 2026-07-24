@@ -63,7 +63,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(config: dict) -> None:
+def run_pipeline(config: dict, cbf_include_sentiment: bool = True) -> None:
     exp_cfg = config["experiment"]
     data_cfg = config["data"]
     split_cfg = config["split"]
@@ -378,14 +378,16 @@ def run_pipeline(config: dict) -> None:
         k_max=20,
         pca_components=config["cbf_clustering"].get("pca_components", 50),
         random_state=exp_cfg["seed"],
+        include_sentiment=cbf_include_sentiment,
     )
     cbf_predictor = CBFPredictor(cbf_config=cbf_config)
     cbf_predictor.fit(full_df_for_items, train_df)
 
     logger.info(
-        "CBF clustering selesai: K optimal=%d (metode=%s)",
+        "CBF clustering selesai: K optimal=%d (metode=%s, include_sentiment=%s)",
         cbf_predictor.clusterer.best_k,
         cbf_config.method,
+        cbf_include_sentiment,
     )
 
     # ---------- 7. Fusion NMF + DecisionTree (verbatim) ----------
@@ -525,6 +527,18 @@ def run_pipeline(config: dict) -> None:
         ),
     }
     results_prefix, model_name, notes = mode_meta.get(absa_mode, mode_meta["mean"])
+    if not cbf_include_sentiment:
+        # Ablasi CBF-tanpa-sentimen: prefix/model_name/notes BEDA supaya file
+        # hasil TIDAK menimpa varian asli (dgn sentiment_agg) -- Invarian #4.
+        results_prefix = f"{results_prefix}_cbf_nosentiment"
+        model_name = f"{model_name}_cbf_nosentiment"
+        notes = (
+            notes + " ABLASI TAMBAHAN: CBFConfig(include_sentiment=False) -- "
+            "sentiment_agg DIKELUARKAN dari fitur numerik item CBF (kategori/"
+            "TF-IDF/review_count/avg_rating tetap dipakai). Stream sentimen "
+            "ABSA TETAP masuk fusion NMF/DT seperti biasa -- yang diablasi "
+            "HANYA kontribusinya lewat CBF."
+        )
     results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
@@ -566,9 +580,17 @@ if __name__ == "__main__":
         "Split & cache skor ABSA/SA TETAP dipakai bersama, cuma tahap 5-8 yang "
         "bervariasi -- run seed tambahan jauh lebih cepat dari run pertama.",
     )
+    parser.add_argument(
+        "--no-cbf-sentiment",
+        action="store_true",
+        help="Ablasi: keluarkan sentiment_agg dari fitur numerik item CBF "
+        "(CBFConfig.include_sentiment=False). Default OFF (perilaku asli, "
+        "tidak berubah). Hasil disimpan ke file TERPISAH (prefix "
+        "'..._cbf_nosentiment'), tidak menimpa hasil varian asli.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     if args.seed is not None:
         cfg["experiment"]["seed"] = args.seed
-    run_pipeline(cfg)
+    run_pipeline(cfg, cbf_include_sentiment=not args.no_cbf_sentiment)
