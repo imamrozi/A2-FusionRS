@@ -1,0 +1,20 @@
+# configs/protocol/legacy_target_review.yaml
+# Fase 1 Step 3 (docs/phase1_spec.md). Protokol lama/legacy: review target d_ui
+# TERLIHAT saat memprediksi (u,i). Ini protokol yang menghasilkan angka
+# `A2-FusionRS_results_ledger.md` (arm P0/P1). Dipertahankan HANYA untuk
+# mereproduksi lineage lama, bukan sebagai kondisi deployment yang sah.
+#
+# Cara pakai: tempelkan blok `protocol` ini ke config domain lewat `_base:`
+# atau merge (src/config_utils.py). Protokol dipilih HANYA lewat config
+# (Invarian #5), tidak pernah lewat edit kode.
+#
+# Guard target-review leakage AKAN memicu di bawah protokol ini (memang review
+# target dipakai). `allow_target_review: true` adalah bypass EKSPLISIT yang
+# HANYA sah untuk `name: legacy` -- lihat src/eval/guards.py::enforce_no_target_leakage.
+# Set false kalau ingin melihat guard benar-benar raise pada arm legacy.
+
+protocol:
+  name: legacy
+  scope: target_visible        # -> src/data/scope.py::TargetVisibleScope
+  allow_target_review: true    # bypass EKSPLISIT, sah HANYA karena name == legacy
+  enforce_temporal: false

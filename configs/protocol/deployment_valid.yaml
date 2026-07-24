@@ -1,0 +1,18 @@
+# configs/protocol/deployment_valid.yaml
+# Fase 1 Step 3 (docs/phase1_spec.md). Protokol deployment-valid: review target
+# d_ui DIKECUALIKAN dari fitur saat memprediksi (u,i). Ini kondisi yang benar
+# saat sistem dipakai nyata -- review belum ditulis user pada saat prediksi.
+#
+# Cara pakai: tempelkan blok `protocol` ini ke config domain lewat `_base:`
+# atau merge (src/config_utils.py). Protokol dipilih HANYA lewat config
+# (Invarian #5), tidak pernah lewat edit kode.
+#
+# Arm P2/P3 (Step 4) memakai protokol ini. Run di bawahnya WAJIB lolos guard
+# `src/eval/guards.py::assert_no_target_leakage`.
+
+protocol:
+  name: deployment_valid
+  scope: historical            # -> src/data/scope.py::HistoricalScope
+  allow_target_review: false   # guard ditegakkan; bypass DILARANG di protokol ini
+  enforce_temporal: false      # Fase 1 utama: split user-based, cukup pengecualian target.
+                               # Step 6 (robustness temporal) menyalakan ini.
