@@ -50,9 +50,9 @@ import torch
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import StandardScaler
 
-from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
-from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
-from src.a2fusionrs.pyabsa_scorer import (
+from src.legacy.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
+from src.legacy.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
+from src.legacy.a2fusionrs.pyabsa_scorer import (
     ABSA_VECTOR_FEATURE_NAMES,
     build_aspect_sequences,
     build_aspect_vocab,
@@ -60,10 +60,10 @@ from src.a2fusionrs.pyabsa_scorer import (
     vectorize_absa_features,
     vectorize_absa_features_rich,
 )
-from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
-from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
-from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
-from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
+from src.legacy.baseline.cbf_clustering import CBFConfig, CBFPredictor
+from src.legacy.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
+from src.legacy.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
+from src.legacy.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
 from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,

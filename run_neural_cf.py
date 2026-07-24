@@ -32,7 +32,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from src.baseline.neural_cf import NeuralCFConfig, NeuralCFTrainer
+from src.legacy.baseline.neural_cf import NeuralCFConfig, NeuralCFTrainer
 from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,

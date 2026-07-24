@@ -29,10 +29,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
-from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
-from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
-from src.baseline.sentiment_bert import (
+from src.legacy.baseline.cbf_clustering import CBFConfig, CBFPredictor
+from src.legacy.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
+from src.legacy.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
+from src.legacy.baseline.sentiment_bert import (
     GlobalSentimentBERT,
     SentimentBertConfig,
     derive_sentiment_label,

@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.a2fusionrs.pyabsa_scorer import PyABSAAspectScorer, PyABSAConfig
+from src.legacy.a2fusionrs.pyabsa_scorer import PyABSAAspectScorer, PyABSAConfig
 from src.config_utils import load_config
 from src.preprocessing import TextPreprocessor
 from src.split_generator import UserBasedSplitGenerator

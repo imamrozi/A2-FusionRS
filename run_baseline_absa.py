@@ -41,11 +41,11 @@ import numpy as np
 import pandas as pd
 import torch
 
-from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
-from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
-from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
-from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
-from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
+from src.legacy.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
+from src.legacy.baseline.cbf_clustering import CBFConfig, CBFPredictor
+from src.legacy.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
+from src.legacy.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
+from src.legacy.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
 from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,
