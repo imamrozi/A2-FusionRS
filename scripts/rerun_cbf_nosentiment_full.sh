@@ -9,9 +9,14 @@
 # (diverifikasi sebelum run) -- TIDAK ada inferensi BERT baru, cuma DeepMF+
 # CBF+fusion di-refit per run (~5 menit/run berdasarkan smoke test).
 #
-# Hasil TERPISAH dari varian asli (prefix *_cbf_nosentiment, lihat
-# run_baseline.py/run_baseline_absa.py --no-cbf-sentiment) -- tidak menimpa
-# ledger yang sudah ada.
+# CATATAN (2026-07-25): CBF-tanpa-sentiment sekarang DEFAULT run_baseline.py/
+# run_baseline_absa.py (bukan lagi opsi ablasi) -- TIDAK perlu flag apa pun
+# lagi utk mendapatkan perilaku ini, cukup panggil polos. Flag
+# --include-cbf-sentiment (kebalikan dari --no-cbf-sentiment lama) HANYA
+# utk reproduksi perilaku lama, TIDAK dipakai di script ini.
+#
+# Hasil TERPISAH dari varian lama (prefix *_cbf_nosentiment) -- tidak
+# menimpa ledger historis yang sudah ada.
 #
 # Satu run gagal TIDAK menghentikan seluruh matriks -- dicatat ke
 # FAILED_RUNS.txt, sisanya tetap lanjut (job 6+ jam, kegagalan 1 run tidak
@@ -84,7 +89,7 @@ for entry in "${DARRAZ_CONFIGS[@]}"; do
   for seed in "${SEEDS[@]}"; do
     out="baseline_reimpl_cbf_nosentiment_${domain}_seed${seed}.yaml"
     run_one "darraz_reimpl_${domain}_seed${seed}" "$out" \
-      run_baseline.py --config "$cfg" --seed "$seed" --no-cbf-sentiment
+      run_baseline.py --config "$cfg" --seed "$seed"
   done
 done
 
@@ -105,7 +110,7 @@ for entry in "${ABSA_DOMAINS[@]}"; do
     for seed in "${SEEDS[@]}"; do
       out="${MODE_PREFIX[$mode_name]}_cbf_nosentiment_${domain}_seed${seed}.yaml"
       run_one "absa_${mode_name}_${domain}_seed${seed}" "$out" \
-        run_baseline_absa.py --config "$cfg" --seed "$seed" --no-cbf-sentiment
+        run_baseline_absa.py --config "$cfg" --seed "$seed"
     done
   done
 done
