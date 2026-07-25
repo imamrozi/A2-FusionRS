@@ -307,6 +307,20 @@ class CBFPredictor:
         self.cluster_avg_rating = train_df_c.groupby("cluster")["stars"].mean().to_dict()
         self.global_mean_rating = float(train_df["stars"].mean())
 
+        # ---- State utk predict_train_loo() (lihat docstring method itu) ----
+        self._item_categories = item_df.set_index("business_id")["categories_list"]
+        labels_arr = np.asarray(labels)
+        self._cluster_centroids = {
+            int(c): item_features[labels_arr == c].mean(axis=0) for c in np.unique(labels_arr)
+        }
+        self._global_avg_rating = float(train_df["stars"].mean())
+        self._sentiment_col = "sentiment_score"  # SAMA dgn default build_item_dataframe()
+        self._global_sentiment_mean = (
+            float(train_df[self._sentiment_col].mean())
+            if self.feature_builder.include_sentiment
+            else None
+        )
+
     def predict(self, df: pd.DataFrame, rating_scale: tuple[float, float] = (1.0, 5.0)) -> np.ndarray:
         if self.item_cluster_labels is None:
             raise RuntimeError("Panggil fit() terlebih dahulu sebelum predict().")
@@ -347,6 +361,126 @@ class CBFPredictor:
                 n_fallback,
                 len(df),
             )
+        return np.clip(preds, rating_min, rating_max)
+
+    def predict_train_loo(
+        self, train_df: pd.DataFrame, rating_scale: tuple[float, float] = (1.0, 5.0)
+    ) -> np.ndarray:
+        """Prediksi CBF KHUSUS baris TRAIN, dengan koreksi leave-one-out.
+
+        Motivasi (reports/cbf_tfidf_leakage_measurement.md): `predict()` biasa
+        memakai `item_cluster_labels` yang DITENTUKAN SEKALI di fit() dari
+        profil item (description_text/avg_rating/review_count) yang mengagre-
+        gasi SELURUH review train item itu -- TERMASUK review baris (u,i) yang
+        sedang diberi skor. Untuk baris TRAIN, ini artinya cluster item i bisa
+        "melihat" review targetnya sendiri. Method ini mengoreksinya: profil
+        item dibangun ULANG per baris, MENGECUALIKAN review baris itu (mean
+        rating & TF-IDF description tanpa kontribusi baris ybs), lalu
+        ditransform lewat vectorizer/scaler/PCA yang SAMA (dari fit(), TIDAK
+        di-refit -- basis reduksi dimensi tetap konsisten dgn fit awal),
+        dan cluster ditentukan ulang via NEAREST CENTROID (jarak Euclidean ke
+        rata-rata fitur tiap cluster hasil fit() asli).
+
+        PENDEKATAN APPROXIMATE YANG DISENGAJA (Invarian #9, dinyatakan
+        eksplisit): re-clustering PENUH per baris tidak feasible secara
+        komputasi (setiap baris train perlu clustering ulang atas SEMUA
+        item). Nearest-centroid adalah aproksimasi murah yang tetap menutup
+        celah leakage inti (review target tidak lagi ikut membentuk profil
+        yang menentukan cluster baris itu sendiri), TANPA mengklaim setara
+        dengan re-clustering global per baris.
+
+        HANYA relevan utk TRAIN -- baris val/test TIDAK PERNAH exposed (review
+        mereka tidak pernah ikut membangun item_df sejak awal, lihat
+        `build_item_dataframe()`), jadi `predict()` biasa tetap benar & lebih
+        murah utk val/test -- JANGAN panggil method ini utk itu.
+        """
+        if self.item_cluster_labels is None:
+            raise RuntimeError("Panggil fit() terlebih dahulu sebelum predict_train_loo().")
+
+        rating_min, rating_max = rating_scale
+        pref_lookup = self.user_cluster_pref.set_index(["user_id", "cluster"])["preference"].to_dict()
+        include_sentiment = self.feature_builder.include_sentiment
+        sentiment_col = self._sentiment_col
+
+        centroid_ids = list(self._cluster_centroids.keys())
+        centroid_matrix = np.stack([self._cluster_centroids[c] for c in centroid_ids])
+
+        preds = np.empty(len(train_df), dtype=np.float32)
+        row_pos = {rid: i for i, rid in enumerate(train_df["review_id"].values)}
+        n_reassigned = 0
+        n_fallback = 0
+
+        for iid, grp in train_df.groupby("business_id"):
+            rids = grp["review_id"].tolist()
+            texts = grp["text_tfidf"].tolist()
+            ratings = grp["stars"].tolist()
+            uids = grp["user_id"].tolist()
+            sentiments = grp[sentiment_col].tolist() if include_sentiment else None
+            n = len(grp)
+
+            if n == 1:
+                # Item HANYA punya review baris ini sendiri -- LOO -> tidak
+                # ada basis profil item sama sekali, fallback global (SAMA
+                # kebijakan cold-start dgn build_item_dataframe()).
+                loo_texts = [""]
+                loo_avg_ratings = [self._global_avg_rating]
+                loo_review_counts = [0]
+                loo_sentiments = [self._global_sentiment_mean] if include_sentiment else None
+            else:
+                total_rating = sum(ratings)
+                total_sentiment = sum(sentiments) if sentiments is not None else None
+                loo_texts, loo_avg_ratings, loo_review_counts = [], [], []
+                loo_sentiments = [] if sentiments is not None else None
+                for j in range(n):
+                    loo_texts.append(" ".join(texts[:j] + texts[j + 1 :]))
+                    loo_avg_ratings.append((total_rating - ratings[j]) / (n - 1))
+                    loo_review_counts.append(n - 1)
+                    if sentiments is not None:
+                        loo_sentiments.append((total_sentiment - sentiments[j]) / (n - 1))
+
+            cat = self._item_categories.get(iid, [])
+            mini_df = pd.DataFrame(
+                {
+                    "business_id": [iid] * n,
+                    "categories_list": [cat] * n,
+                    "description_text": loo_texts,
+                    "review_count": loo_review_counts,
+                    "avg_rating": loo_avg_ratings,
+                }
+            )
+            if include_sentiment:
+                mini_df["sentiment_agg"] = loo_sentiments
+
+            corrected_features = self.feature_builder.transform(mini_df)  # (n, D)
+            dists = np.linalg.norm(
+                corrected_features[:, None, :] - centroid_matrix[None, :, :], axis=2
+            )
+            nearest = dists.argmin(axis=1)
+            corrected_clusters = [centroid_ids[k] for k in nearest]
+
+            naive_cluster = self.item_cluster_labels.get(iid)
+            for j in range(n):
+                cluster = corrected_clusters[j]
+                if cluster != naive_cluster:
+                    n_reassigned += 1
+                preference = pref_lookup.get((uids[j], cluster))
+                cluster_avg = self.cluster_avg_rating.get(cluster, self.global_mean_rating)
+                if preference is None:
+                    pred = cluster_avg
+                    n_fallback += 1
+                else:
+                    pred = rating_min + preference * (rating_max - rating_min) * 0.5 + cluster_avg * 0.5
+                preds[row_pos[rids[j]]] = pred
+
+        logger.info(
+            "predict_train_loo: %d/%d baris (%.1f%%) berpindah cluster setelah koreksi LOO; "
+            "%d/%d baris fallback (kombinasi user x cluster-terkoreksi belum pernah ada di train).",
+            n_reassigned,
+            len(train_df),
+            100.0 * n_reassigned / len(train_df),
+            n_fallback,
+            len(train_df),
+        )
         return np.clip(preds, rating_min, rating_max)
 
 

@@ -397,7 +397,10 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
 
     logger.info("Menghitung prediksi 3 stream pada train set...")
     train_deepmf_preds = deepmf_trainer.predict(train_df, user2idx, item2idx, rating_scale)
-    train_cbf_preds = cbf_predictor.predict(train_df, rating_scale)
+    # predict_train_loo() (BUKAN predict()): baris train dapat koreksi
+    # leave-one-out -- profil cluster item TIDAK boleh menyertakan review
+    # baris itu sendiri (lihat reports/cbf_tfidf_leakage_measurement.md).
+    train_cbf_preds = cbf_predictor.predict_train_loo(train_df, rating_scale)
 
     logger.info("Menghitung prediksi 3 stream pada test set...")
     test_deepmf_preds = deepmf_trainer.predict(test_df, user2idx, item2idx, rating_scale)
