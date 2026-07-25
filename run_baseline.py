@@ -55,7 +55,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(config: dict, cbf_include_sentiment: bool = True) -> None:
+def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
     exp_cfg = config["experiment"]
     data_cfg = config["data"]
     split_cfg = config["split"]
@@ -383,16 +383,21 @@ if __name__ == "__main__":
         "benar-benar bervariasi -- jadi run seed tambahan jauh lebih cepat.",
     )
     parser.add_argument(
-        "--no-cbf-sentiment",
+        "--include-cbf-sentiment",
         action="store_true",
-        help="Ablasi: keluarkan sentiment_agg (SA global) dari fitur numerik "
-        "item CBF (CBFConfig.include_sentiment=False). Default OFF (perilaku "
-        "asli). Hasil disimpan ke file TERPISAH (prefix 'baseline_reimpl_cbf_"
-        "nosentiment'), tidak menimpa hasil varian asli.",
+        help="Reproduksi perilaku LAMA (sebelum 2026-07-25): masukkan "
+        "sentiment_agg (SA global) ke fitur numerik item CBF "
+        "(CBFConfig.include_sentiment=True). Default OFF -- desain yang "
+        "BENAR (sentiment terpisah dari CBF, arsitektur A2-IRM) adalah "
+        "default sekarang. Flag ini HANYA utk reproduksi/perbandingan "
+        "historis, BUKAN direkomendasikan utk run baru. Hasil tetap disimpan "
+        "ke file prefix 'baseline_reimpl' TANPA suffix (skema penamaan lama,"
+        " dipertahankan apa adanya) -- run default (tanpa flag ini) memakai "
+        "suffix 'baseline_reimpl_cbf_nosentiment', TIDAK menimpa hasil lama.",
     )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     if args.seed is not None:
         cfg["experiment"]["seed"] = args.seed
-    run_pipeline(cfg, cbf_include_sentiment=not args.no_cbf_sentiment)
+    run_pipeline(cfg, cbf_include_sentiment=args.include_cbf_sentiment)

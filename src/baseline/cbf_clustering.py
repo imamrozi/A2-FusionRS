@@ -42,11 +42,15 @@ class CBFConfig:
     # n_item-1, n_fitur) saat runtime supaya aman untuk subset kecil.
     pca_components: int = 50
     random_state: int = 42
-    # Default True = perilaku ASLI, tidak berubah sama sekali (non-breaking).
-    # False = ablasi: keluarkan sentiment_agg dari fitur numerik item (lihat
-    # ItemFeatureBuilder) -- utk menguji seberapa besar kontribusi sentimen
-    # thd hasil clustering CBF, terpisah dari kontribusinya via stream fusion.
-    include_sentiment: bool = True
+    # Default False = desain yang BENAR sesuai arsitektur A2-IRM: sentiment
+    # analysis (SA global maupun ABSA) TERPISAH dari CF dan CBF, langsung
+    # masuk ke Fusion. sentiment_agg TIDAK termasuk fitur numerik item CBF
+    # (lihat ItemFeatureBuilder). True TERSEDIA hanya utk mereproduksi
+    # perilaku LAMA (sebelum diperbaiki 2026-07-25) sbg pembanding/
+    # dokumentasi historis -- BUKAN varian yang direkomendasikan. Diverifikasi
+    # (reports/absa_aggregation_comparison.md): keluarkan sentiment dari CBF
+    # tidak mengorbankan performa berarti di 13/15 kombinasi model x domain.
+    include_sentiment: bool = False
 
 
 class ItemFeatureBuilder:
@@ -58,7 +62,7 @@ class ItemFeatureBuilder:
         tfidf_max_features: int = 500,
         pca_components: int = 50,
         random_state: int = 42,
-        include_sentiment: bool = True,
+        include_sentiment: bool = False,
     ):
         self.tfidf_max_features = tfidf_max_features
         self.pca_components = pca_components
