@@ -401,6 +401,71 @@ class KeywordAspectSentimentScorer:
         }
 
 
+def compute_p3_features(
+    train_df: pd.DataFrame,
+    eval_df: pd.DataFrame,
+    feature_cols: list[str],
+    item_col: str = "business_id",
+    exclude_own_row: bool = False,
+) -> np.ndarray:
+    """Arm P3 (`docs/phase1_spec.md` di branch `phase2-a2-fusionrs`, Step 4):
+    ganti fitur sentimen/ABSA PER-BARIS (yang aslinya dihitung LANGSUNG dari
+    review $d_{ui}$ baris itu sendiri -- lihat `score_dataframe*()` di atas)
+    dengan PROFIL RATA-RATA item dari review TRAIN, tanpa shrinkage/bobot
+    importance user -- sengaja naif sesuai spesifikasi (inilah yang harus
+    dikalahkan Fase 2 kalau nanti dibangun). Ini adalah versi P3 dari
+    mekanisme yang SAMA dengan `CBFPredictor.predict_train_loo()`, cuma
+    diterapkan ke fitur aspek/confidence, bukan TF-IDF/avg_rating.
+
+    Dipanggil 2x per protokol P3: sekali untuk `train_df`
+    (`exclude_own_row=True` -- LOO WAJIB, invarian #6 phase1_spec.md: baris
+    train tidak boleh menyertakan review-nya sendiri di dalam profil rata-
+    rata yang dipakai memprediksi baris itu, kalau tidak model belajar
+    shortcut yang tidak tersedia saat test), sekali untuk `test_df`
+    (`exclude_own_row=False` -- review test tidak pernah ada di train, jadi
+    tidak ada leakage tanpa LOO).
+
+    Item TANPA review train sama sekali (cold-start item, cuma bisa terjadi
+    di `eval_df=test_df`) ATAU (`exclude_own_row=True` dan item cuma punya
+    1 review train, sehingga tidak ada review "lain" sbg profil) fallback
+    ke rata-rata GLOBAL train -- kebijakan fallback dinyatakan eksplisit di
+    sini (invarian #9 phase1_spec.md), bukan implisit lewat NaN yang
+    merambat diam-diam.
+    """
+    train_features = train_df[feature_cols].to_numpy(dtype=np.float64)
+    global_mean = train_features.mean(axis=0)
+
+    grouped = train_df[feature_cols].groupby(train_df[item_col])
+    sum_by_item = grouped.sum()
+    count_by_item = grouped.size()
+
+    own_item = eval_df[item_col].to_numpy()
+    row_sum = sum_by_item.reindex(own_item).to_numpy(dtype=np.float64)
+    row_count = count_by_item.reindex(own_item).to_numpy(dtype=np.float64)
+
+    if exclude_own_row:
+        row_sum = row_sum - eval_df[feature_cols].to_numpy(dtype=np.float64)
+        row_count = row_count - 1.0
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        profile = row_sum / row_count[:, None]
+
+    fallback_mask = ~np.isfinite(profile).all(axis=1)
+    n_fallback = int(fallback_mask.sum())
+    profile[fallback_mask] = global_mean
+
+    logger.info(
+        "compute_p3_features (%s, exclude_own_row=%s): %d/%d baris fallback ke "
+        "rata-rata global train (item cold-start ATAU cuma punya 1 review "
+        "train setelah LOO).",
+        "train" if exclude_own_row else "eval",
+        exclude_own_row,
+        n_fallback,
+        len(eval_df),
+    )
+    return profile
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger.info(

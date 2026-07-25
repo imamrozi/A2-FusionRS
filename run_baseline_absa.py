@@ -41,7 +41,7 @@ import numpy as np
 import pandas as pd
 import torch
 
-from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
+from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer, compute_p3_features
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
 from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset, compute_oof_predictions
 from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
@@ -63,7 +63,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
+def run_pipeline(
+    config: dict,
+    cbf_include_sentiment: bool = False,
+    sentiment_protocol: str = "target_review",
+) -> None:
     exp_cfg = config["experiment"]
     data_cfg = config["data"]
     split_cfg = config["split"]
@@ -417,17 +421,61 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
     if absa_mode == "concat":
         # Vektor mentah k-kolom (bukan 1 skalar) -- NMFDecisionTreeFusion
         # sudah digeneralisasi terima input 2D (lihat fusion_nmf_dt.py).
-        train_sentiment_scores = train_df[aspect_names].values
-        test_sentiment_scores = test_df[aspect_names].values
+        feature_cols = aspect_names
     elif absa_mode == "concat_confidence":
         # 8 kolom (4 skor + 4 confidence) -- confidence sbg fitur EKSTRA,
         # bukan utk agregasi.
         feature_cols = aspect_names + confidence_names
+    else:
+        feature_cols = ["sentiment_score"]
+
+    if sentiment_protocol == "p3_historical_agg":
+        # Arm P3 (docs/phase1_spec.md di branch phase2-a2-fusionrs, Step 4):
+        # fitur eval TIDAK dihitung langsung dari review (u,i) yang sedang
+        # diprediksi -- diganti profil rata-rata item dari review TRAIN
+        # (LOO wajib utk baris train, lihat compute_p3_features()). Cache
+        # skor tahap 4 di atas TETAP dipakai apa adanya sbg BAHAN agregasi
+        # ini -- TIDAK ada panggilan BERT/keyword baru.
+        logger.info(
+            "=== Protokol sentimen P3: mengganti fitur %s per-baris dgn profil "
+            "rata-rata item dari review TRAIN (LOO utk baris train) ===",
+            feature_cols,
+        )
+        train_sentiment_scores = compute_p3_features(
+            train_df, train_df, feature_cols, exclude_own_row=True,
+        )
+        test_sentiment_scores = compute_p3_features(
+            train_df, test_df, feature_cols, exclude_own_row=False,
+        )
+        if len(feature_cols) == 1:
+            # NMFDecisionTreeFusion menerima kolom tunggal sbg vektor 1D,
+            # konsisten dgn cabang non-P3 di bawah (train_df["sentiment_score"]
+            # .values, bukan array (N,1)).
+            train_sentiment_scores = train_sentiment_scores[:, 0]
+            test_sentiment_scores = test_sentiment_scores[:, 0]
+    elif sentiment_protocol == "no_sentiment_ablation":
+        # Ablasi murni: HAPUS stream sentimen sepenuhnya dari fusion (BUKAN
+        # substitusi P2/P3) -- mengukur akurasi hybrid DeepMF+CBF SENDIRIAN,
+        # tanpa sinyal sentimen sama sekali. Kolom KONSTAN (bukan menghapus
+        # argumen sentiment_scores dari fusion_model.fit/predict, yg
+        # mewajibkan 3 argumen) -- kolom konstan = TIDAK ADA variance =
+        # TIDAK ADA informasi yg bisa dipelajari DecisionTree dari kolom
+        # itu, jadi SECARA EFEKTIF setara "no sentiment" tanpa mengubah
+        # fusion_nmf_dt.py (additive, non-invasive, ZERO risiko regresi ke
+        # fusion 3-stream yg sudah divalidasi).
+        logger.info(
+            "=== Protokol sentimen 'no_sentiment_ablation': stream sentimen "
+            "DIHAPUS dari fusion (kolom konstan, nol informasi) -- mengukur "
+            "akurasi hybrid DeepMF+CBF SENDIRIAN ==="
+        )
+        train_sentiment_scores = np.zeros(len(train_df), dtype=np.float32)
+        test_sentiment_scores = np.zeros(len(test_df), dtype=np.float32)
+    else:
         train_sentiment_scores = train_df[feature_cols].values
         test_sentiment_scores = test_df[feature_cols].values
-    else:
-        train_sentiment_scores = train_df["sentiment_score"].values
-        test_sentiment_scores = test_df["sentiment_score"].values
+        if len(feature_cols) == 1:
+            train_sentiment_scores = train_sentiment_scores[:, 0]
+            test_sentiment_scores = test_sentiment_scores[:, 0]
 
     fusion_config = FusionConfig(
         nmf_components=config["fusion_baseline"]["nmf_components"],
@@ -550,12 +598,40 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
             "ABSA TETAP masuk fusion NMF/DT seperti biasa -- yang diablasi "
             "HANYA kontribusinya lewat CBF."
         )
+    if sentiment_protocol == "p3_historical_agg":
+        # Protokol P3 (docs/phase1_spec.md di branch phase2-a2-fusionrs):
+        # prefix/model_name/notes BEDA supaya file hasil TIDAK menimpa
+        # protokol target_review (P1) -- sama semangat dgn suffix
+        # _cbf_nosentiment di atas.
+        results_prefix = f"{results_prefix}_p3historicalagg"
+        model_name = f"{model_name}_p3_historical_agg"
+        notes = (
+            notes + " PROTOKOL P3 (docs/phase1_spec.md, Step 4): fitur "
+            "sentimen/ABSA baris eval DIGANTI profil rata-rata item dari "
+            "review TRAIN (LOO utk baris train, invarian #6) -- BUKAN "
+            "dihitung langsung dari review (u,i) yang sedang diprediksi. "
+            "Mengukur berapa banyak akurasi protokol target_review (P1) "
+            "bertahan tanpa akses ke review target saat inferensi. Lihat "
+            "compute_p3_features() di src/a2fusionrs/absa_bert.py."
+        )
+    elif sentiment_protocol == "no_sentiment_ablation":
+        # Ablasi murni: prefix/model_name/notes BEDA supaya file hasil
+        # TIDAK menimpa protokol target_review (P1) maupun p3_historical_agg.
+        results_prefix = f"{results_prefix}_no_sentiment"
+        model_name = f"{model_name}_no_sentiment_ablation"
+        notes = (
+            notes + " ABLASI: stream sentimen DIHAPUS sepenuhnya dari fusion "
+            "(kolom konstan, nol informasi) -- mengukur akurasi hybrid "
+            "DeepMF (OOF) + CBF (LOO) SENDIRIAN, tanpa sinyal sentimen sama "
+            "sekali."
+        )
     results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
         "model_name": model_name,
         "domain": exp_cfg["domain"],
         "seed": exp_cfg["seed"],
+        "sentiment_protocol": sentiment_protocol,
         "n_test_samples": int(len(test_df)),
         "rmse": rmse,
         "mae": mae,
@@ -603,9 +679,30 @@ if __name__ == "__main__":
         "dipertahankan apa adanya) -- run default (tanpa flag ini) memakai "
         "suffix '..._cbf_nosentiment', TIDAK menimpa hasil lama.",
     )
+    parser.add_argument(
+        "--sentiment-protocol",
+        type=str,
+        default="target_review",
+        choices=["target_review", "p3_historical_agg", "no_sentiment_ablation"],
+        help="target_review (default, protokol P1 lama): fitur sentimen/ABSA "
+        "dihitung LANGSUNG dari review (u,i) yang sedang diprediksi -- "
+        "TIDAK tersedia lagi saat deployment sungguhan (review belum "
+        "ditulis). p3_historical_agg: ganti fitur eval dgn PROFIL RATA-RATA "
+        "item dari review TRAIN (LOO utk baris train), sesuai arm P3 "
+        "docs/phase1_spec.md di branch phase2-a2-fusionrs. "
+        "no_sentiment_ablation: HAPUS stream sentimen sepenuhnya dari fusion "
+        "(kolom konstan, nol informasi) -- mengukur akurasi hybrid "
+        "DeepMF+CBF sendirian, tanpa sinyal sentimen sama sekali. Hasil "
+        "disimpan ke prefix terpisah per protokol, TIDAK menimpa hasil "
+        "target_review.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
     if args.seed is not None:
         cfg["experiment"]["seed"] = args.seed
-    run_pipeline(cfg, cbf_include_sentiment=args.include_cbf_sentiment)
+    run_pipeline(
+        cfg,
+        cbf_include_sentiment=args.include_cbf_sentiment,
+        sentiment_protocol=args.sentiment_protocol,
+    )
