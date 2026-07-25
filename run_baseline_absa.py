@@ -43,7 +43,7 @@ import torch
 
 from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
-from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset
+from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset, compute_oof_predictions
 from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
 from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
 from src.config_utils import load_config
@@ -395,8 +395,16 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
 
     rating_scale = (1.0, 5.0)
 
-    logger.info("Menghitung prediksi 3 stream pada train set...")
-    train_deepmf_preds = deepmf_trainer.predict(train_df, user2idx, item2idx, rating_scale)
+    logger.info("Menghitung prediksi 3 stream pada train set (DeepMF via OOF, hindari leakage in-sample)...")
+    # compute_oof_predictions() (BUKAN deepmf_trainer.predict()): lihat
+    # docstring-nya di src/baseline/deepmf.py -- trainer SUDAH dilatih pada
+    # seluruh train_df, predict() langsung di situ = leakage in-sample.
+    # deepmf_trainer (model PENUH) tetap dipakai apa adanya utk
+    # test_deepmf_preds -- itu genuinely out-of-sample.
+    train_deepmf_preds = compute_oof_predictions(
+        train_df, val_interactions, user2idx, item2idx, len(all_items),
+        deepmf_config, rating_scale, seed=exp_cfg["seed"],
+    )
     # predict_train_loo() (BUKAN predict()): baris train dapat koreksi
     # leave-one-out -- profil cluster item TIDAK boleh menyertakan review
     # baris itu sendiri (lihat reports/cbf_tfidf_leakage_measurement.md).

@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from sklearn.model_selection import KFold
 from torch.utils.data import DataLoader, Dataset
 
 logger = logging.getLogger(__name__)
@@ -277,6 +278,73 @@ class DeepMFTrainer:
 
         self.model.train()
         return preds
+
+
+def compute_oof_predictions(
+    train_df: pd.DataFrame,
+    val_dataset: InteractionDataset,
+    user2idx: dict,
+    item2idx: dict,
+    n_items: int,
+    config: DeepMFConfig,
+    rating_scale: tuple[float, float] = (1.0, 5.0),
+    seed: int = 42,
+    n_folds: int = 5,
+) -> np.ndarray:
+    """Prediksi DeepMF utk baris TRAIN via K-fold out-of-fold (OOF) --
+    HINDARI leakage in-sample klasik pada stacked/meta-learner: `predict()`
+    biasa dipanggil pada model yang BARU SAJA dilatih pada baris yang SAMA
+    (`trainer.fit(train_interactions); trainer.predict(train_df)`), jadi
+    prediksinya bisa jauh lebih akurat drpd performa out-of-sample
+    sebenarnya (embedding+MLP punya insentif kuat "menghafal" pasangan
+    (u,i,rating) yang dilihat saat training). Fusion (NMF+DecisionTree)
+    yang dilatih di atas `train_deepmf_preds` yang optimis ini bisa belajar
+    mengandalkan sinyal yang TIDAK bisa direplikasi saat evaluasi test
+    (`test_deepmf_preds` genuinely out-of-sample, `train_deepmf_preds`
+    tidak) -- pola klasik "stacked generalization butuh base-model OOF"
+    (Wolpert 1992), sudah dipakai jalur berbeda (residual base AGF) di
+    `run_attention_gated_fusion.py` branch phase2-a2-fusionrs.
+
+    Skema: split TRAIN (bukan val/test -- itu tetap dari split asli, TIDAK
+    diregenerate, Invarian #3) jadi `n_folds` fold; per fold, latih model
+    BARU hanya pada fold FIT (n_folds-1/n_folds baris train), validasi
+    early-stopping pakai `val_dataset` ASLI (split terpisah, tidak
+    memperkenalkan leakage baru), lalu prediksi HANYA pada fold HOLDOUT.
+    Gabungan prediksi holdout lintas fold = OOF prediction utk seluruh
+    train_df, tiap baris diprediksi oleh model yang TIDAK PERNAH melihat
+    baris itu.
+
+    BIAYA: `n_folds` kali lipat waktu training DeepMF (tiap fold latih
+    model dari nol, `config.epochs` epoch penuh) -- signifikan lebih mahal
+    drpd `predict()` biasa. `test_deepmf_preds` TIDAK perlu OOF (model
+    penuh yang dilatih SETELAH fungsi ini, di atas SELURUH train_df, sudah
+    genuinely out-of-sample thd test set -- lihat run_baseline.py/
+    run_baseline_absa.py tahap 7).
+    """
+    n_users = len(user2idx)
+    oof_preds = np.empty(len(train_df), dtype=np.float32)
+    kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+
+    for fold_idx, (fit_pos, holdout_pos) in enumerate(kf.split(np.arange(len(train_df)))):
+        fit_df = train_df.iloc[fit_pos].reset_index(drop=True)
+        holdout_df = train_df.iloc[holdout_pos].reset_index(drop=True)
+
+        fit_dataset = InteractionDataset(
+            fit_df, user2idx, item2idx, n_items, config.negative_sampling_ratio, rating_scale, seed=seed
+        )
+        fold_trainer = DeepMFTrainer(n_users, n_items, config)
+        fold_trainer.fit(fit_dataset, val_dataset)
+        oof_preds[holdout_pos] = fold_trainer.predict(holdout_df, user2idx, item2idx, rating_scale)
+
+        logger.info(
+            "OOF DeepMF fold %d/%d selesai (%d baris fit, %d baris holdout diprediksi)",
+            fold_idx + 1,
+            n_folds,
+            len(fit_df),
+            len(holdout_df),
+        )
+
+    return oof_preds
 
 
 if __name__ == "__main__":
