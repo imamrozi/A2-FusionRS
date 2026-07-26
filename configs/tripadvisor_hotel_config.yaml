@@ -52,10 +52,14 @@ deepmf:
   hidden_layers: [256, 128, 64, 32]
   dropout: 0.3
   batch_size: 512
-  learning_rate: 0.001
+  # optimizer/learning_rate diubah 2026-07-26 (Temuan A3/23, reports/
+  # methodology_audit_2026-07-26.md): SGD lr=0.001 (nilai lama) terbukti
+  # kolaps training 5/5 seed domain hotel -- AdamW lr=0.002 terverifikasi
+  # 0/5 kolaps di 5 seed yang sama. Lihat src/baseline/deepmf.py.
+  learning_rate: 0.002
   negative_sampling_ratio: 0
   loss: "mse"
-  optimizer: "sgd"
+  optimizer: "adamw"
 
 cbf_clustering:
   method: "agglomerative"   # sesuai baseline: Agglomerative utk domain hotel (KMeans utk restoran)

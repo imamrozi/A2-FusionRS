@@ -52,10 +52,10 @@ deepmf:
   hidden_layers: [256, 128, 64, 32]
   dropout: 0.3
   batch_size: 512
-  learning_rate: 0.001
+  learning_rate: 0.002  # diubah 2026-07-26, Temuan A3/23 (AdamW lr=0.002 terverifikasi 0/5 kolaps vs SGD lr=0.001 5/5 kolaps)
   negative_sampling_ratio: 0
   loss: "mse"
-  optimizer: "sgd"
+  optimizer: "adamw"
 
 cbf_clustering:
   method: "kmeans"

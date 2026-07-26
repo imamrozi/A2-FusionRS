@@ -60,7 +60,11 @@ deepmf:
   hidden_layers: [256, 128, 64, 32]
   dropout: 0.3
   batch_size: 512
-  learning_rate: 0.001
+  # optimizer/learning_rate diubah 2026-07-26 (Temuan A3/23, reports/
+  # methodology_audit_2026-07-26.md): SGD lr=0.001 (nilai lama) terbukti
+  # kolaps training 5/5 seed (domain hotel, diuji) -- AdamW lr=0.002
+  # terverifikasi 0/5 kolaps. Lihat src/baseline/deepmf.py.
+  learning_rate: 0.002
   # 0 (bukan 4) -- Table 10 paper (hyperparameter DeepMF) TIDAK menyebut
   # negative sampling sama sekali. Diverifikasi empiris juga: negative
   # sampling ratio 1:4 menyebabkan val RMSE overfit sejak epoch 1->2 dan
@@ -71,7 +75,7 @@ deepmf:
   # sendiri (Fase 2) kalau memang diperlukan, bukan untuk baseline ini.
   negative_sampling_ratio: 0
   loss: "mse"
-  optimizer: "sgd"
+  optimizer: "adamw"
 
 cbf_clustering:
   method: "kmeans"              # baseline: K-Means (restoran), Agglomerative (hotel)

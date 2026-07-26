@@ -7,8 +7,12 @@ mengikuti spesifikasi arsitektur pada proposal (Embedding 128, Deep layers
 sebagai salah satu stream A2-FusionRS -- perbedaan utama ada di fusion
 layer, bukan di modul DeepMF ini sendiri.
 
-Catatan: hyperparameter batch_size=512, lr=0.001 sesuai proposal bagian E
-(Metode). negative_sampling_ratio DEFAULT DI CONFIG BASELINE = 0 (bukan 1:4
+Catatan: hyperparameter batch_size=512 sesuai proposal bagian E (Metode).
+lr=0.001 + optimizer SGD polos JUGA sesuai proposal awal, TAPI terbukti
+menyebabkan kolaps training universal (Temuan A3/23, reports/
+methodology_audit_2026-07-26.md, lihat DeepMFConfig) -- default SEKARANG
+lr=0.002 + optimizer AdamW, penyimpangan disengaja dari proposal demi
+training yang benar-benar berfungsi. negative_sampling_ratio DEFAULT DI CONFIG BASELINE = 0 (bukan 1:4
 seperti draf awal proposal) -- Table 10 baseline paper (Darraz et al.) tidak
 menyebut negative sampling sama sekali untuk DeepMF, dan secara empiris
 (run penuh domain restoran) ratio 1:4 terbukti menyebabkan overfit parah:
@@ -41,18 +45,29 @@ class DeepMFConfig:
     hidden_layers: tuple[int, ...] = (256, 128, 64, 32)
     dropout: float = 0.3
     batch_size: int = 512
-    learning_rate: float = 0.001
+    # PERUBAHAN DEFAULT 2026-07-26 (Temuan A3/23, reports/methodology_audit_
+    # 2026-07-26.md): SGD polos (lr=0.001, default LAMA sesuai Table 10
+    # baseline paper) TERBUKTI KOLAPS TOTAL ke prediktor nyaris-konstan di
+    # 5/5 seed protokol proyek (42/123/456/789/1011), domain hotel -- BUKAN
+    # cuma test set, prediksi di TRAIN SAMPLE juga kolaps (std=0,0000).
+    # Diduga vanishing gradient ke embedding (init std=0.01 x element-wise
+    # product x SGD tanpa momentum). Dikonfirmasi BUKAN disebabkan OOF/LOO
+    # (scripts/diagnose_deepmf_collapse.py sama sekali tidak mengandung
+    # keduanya, kolaps tetap 5/5). AdamW lr=0.002: 0/5 kolaps (test_std
+    # 0,0021-0,0032, 76-84% baris prediksi unik vs 0,4-0,5% sblmnya,
+    # test_mean ~3,90 mendekati rata-rata rating asli ~3,94). AdamW
+    # lr=0.001 (lr lama+optimizer baru saja): MASIH 1/5 kolaps (seed 42) --
+    # lr HARUS ikut naik, ganti optimizer saja tidak cukup.
+    learning_rate: float = 0.002
     epochs: int = 20
     negative_sampling_ratio: int = 4
-    # "sgd" (default -- perilaku LAMA, sesuai Table 10 baseline paper) |
-    # "adam" | "adamw". Ditambah krn SGD polos (tanpa momentum/weight_decay)
-    # terbukti SANGAT sensitif thd learning_rate -- band stabil sempit,
-    # kolaps total ke prediktor konstan di lr yg cuma naik sedikit (lihat
-    # hasil tuning_deepmf_oof_val_search.csv: lr=0.003 val RMSE 0.93 ->
-    # lr=0.005 val RMSE 3.07, kolaps). Adam/AdamW jauh lebih toleran thd
-    # pilihan lr -- hipotesis: bisa menstabilkan training SEKALIGUS
-    # berpotensi hasil lbh baik dari default SGD.
-    optimizer: str = "sgd"
+    # "sgd" | "adam" | "adamw" (DEFAULT BARU). AdamW dipilih di atas Adam
+    # polos krn keduanya IDENTIK scr matematis selama weight_decay=0
+    # (dikonfirmasi empiris: val_fusion_rmse Adam & AdamW sama persis di
+    # tiap lr yg diuji, stage0_optimizer_lr) -- AdamW lebih siap kalau
+    # weight_decay>0 dieksplorasi ke depan (decoupled weight decay, axis
+    # yg blm pernah diuji).
+    optimizer: str = "adamw"
     weight_decay: float = 0.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
