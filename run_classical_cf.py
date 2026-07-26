@@ -32,7 +32,6 @@ from src.baseline.classical_cf import ClassicalCFConfig, ClassicalCFTrainer
 from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,
-    precision_recall_ndcg_at_k,
     sanity_check_rmse,
     save_predictions,
     save_results_yaml,
@@ -87,27 +86,9 @@ def run_one_algorithm(algorithm: str, config: dict, train_df, test_df) -> None:
     logger.info("MAE : %.4f", mae)
     logger.info("=" * 60)
 
-    # Ranking metrics -- SIMPLIFIKASI SAMA dengan run_baseline.py: candidate
-    # set per user dibatasi ke item test set saja (bukan full-catalog).
-    test_df_eval = test_df.copy()
-    test_df_eval["pred_score"] = test_preds
-
-    relevance_threshold = 4.0
-    ranked_items_per_user: dict = {}
-    relevant_items_per_user: dict = {}
-    for user_id, group in test_df_eval.groupby("user_id"):
-        ranked = group.sort_values("pred_score", ascending=False)["business_id"].tolist()
-        ranked_items_per_user[user_id] = ranked
-        relevant = set(group[group["stars"] >= relevance_threshold]["business_id"])
-        relevant_items_per_user[user_id] = relevant
-
-    k_values = config["evaluation"]["k_values"]
-    precision_k, recall_k, ndcg_k = precision_recall_ndcg_at_k(
-        ranked_items_per_user, relevant_items_per_user, k_values
-    )
-    logger.info("Precision@K: %s", precision_k)
-    logger.info("Recall@K   : %s", recall_k)
-    logger.info("NDCG@K     : %s", ndcg_k)
+    # Ranking metrics (Precision/Recall/NDCG@K) DINONAKTIFKAN (Temuan A1,
+    # reports/methodology_audit_2026-07-26.md) -- lihat komentar identik di
+    # run_baseline.py utk alasan lengkap.
 
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -121,14 +102,11 @@ def run_one_algorithm(algorithm: str, config: dict, train_df, test_df) -> None:
         "n_test_samples": int(len(test_df)),
         "rmse": rmse,
         "mae": mae,
-        "precision_at_k": {int(k): v for k, v in precision_k.items()},
-        "recall_at_k": {int(k): v for k, v in recall_k.items()},
-        "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
         "notes": (
             "Baseline CF ringan (murni CF, tanpa sentiment/content-based), "
             "TIDAK bagian dari reimplementasi hybrid Darraz et al. Ranking "
-            "metrics pakai candidate set terbatas ke item test set, sama "
-            "seperti baseline_reimpl_*.yaml -- lihat run_baseline.py."
+            "metrics (Precision/Recall/NDCG@K) SENGAJA TIDAK dihitung/"
+            "dilaporkan (Temuan A1, reports/methodology_audit_2026-07-26.md)."
         ),
     }
     save_results_yaml(results_path, results_summary, config=config)

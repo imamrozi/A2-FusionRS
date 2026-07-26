@@ -41,7 +41,6 @@ from src.config_utils import load_config
 from src.data_loader import get_loader_class
 from src.evaluation.metrics import (
     compute_rmse_mae,
-    precision_recall_ndcg_at_k,
     log_stream_diagnostics,
     sanity_check_rmse,
     save_predictions,
@@ -322,36 +321,17 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
 
     # Ranking metrics (Precision/Recall/NDCG@K) -- SIMPLIFIKASI YANG PERLU
     # DICATAT: candidate set per user dibatasi hanya pada item yang muncul
-    # di test set (bukan seluruh katalog item), karena ranking terhadap
-    # seluruh katalog jutaan item tidak feasible dihitung untuk setiap user
-    # pada tahap baseline ini. Ini praktik umum evaluasi offline RS skala
-    # menengah, TAPI harus dinyatakan eksplisit sebagai batasan di bagian
-    # metodologi/limitasi manuskrip -- angka Precision/Recall/NDCG absolut
-    # tidak boleh dibandingkan langsung dengan studi lain yang memakai
-    # protokol full-catalog ranking.
-    logger.info("Menghitung ranking metrics (Precision/Recall/NDCG@K)...")
-
-    test_df_eval = test_df.copy()
-    test_df_eval["pred_score"] = test_final_preds
-
-    relevance_threshold = 4.0  # rating >=4 dianggap "relevant", konsisten dgn literatur umum
-    ranked_items_per_user: dict = {}
-    relevant_items_per_user: dict = {}
-
-    for user_id, group in test_df_eval.groupby("user_id"):
-        ranked = group.sort_values("pred_score", ascending=False)["business_id"].tolist()
-        ranked_items_per_user[user_id] = ranked
-        relevant = set(group[group["stars"] >= relevance_threshold]["business_id"])
-        relevant_items_per_user[user_id] = relevant
-
-    k_values = config["evaluation"]["k_values"]
-    precision_k, recall_k, ndcg_k = precision_recall_ndcg_at_k(
-        ranked_items_per_user, relevant_items_per_user, k_values
-    )
-
-    logger.info("Precision@K: %s", precision_k)
-    logger.info("Recall@K   : %s", recall_k)
-    logger.info("NDCG@K     : %s", ndcg_k)
+    # di test set (bukan seluruh katalog item) -- DINONAKTIFKAN (Temuan A1,
+    # reports/methodology_audit_2026-07-26.md): candidate set per user HANYA
+    # berisi baris test milik user itu sendiri, dan 96,1% user (domain hotel)
+    # cuma punya TEPAT 1 item test -- akibatnya Recall@5/NDCG@5 otomatis
+    # ~1,0 TERLEPAS dari kualitas model (me-ranking "top-5 dari 1 kandidat").
+    # Angka yang sebelumnya dilaporkan di sini (Recall~0,9999, NDCG~0,996)
+    # adalah ARTEFAK DESAIN EVALUASI, bukan indikator kualitas ranking --
+    # tidak layak dipakai/dilaporkan sampai protokol candidate-set yang
+    # benar (sampled negatives atau full-catalog ranking) diimplementasikan.
+    # RMSE/MAE di bawah TETAP valid sbg metrik utama, tidak terpengaruh isu
+    # ini sama sekali (murni regresi, bukan ranking).
 
     # Simpan hasil ke file untuk dibandingkan dengan model lain (SVD, NCF,
     # DeepFM, A2-FusionRS, dan varian ablasi) yang akan dijalankan terpisah.
@@ -360,8 +340,10 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
     results_prefix = "baseline_reimpl"
     model_name = "baseline_reimplementation_darraz_et_al"
     notes = (
-        "Ranking metrics dihitung dengan candidate set terbatas pada item "
-        "test set (bukan full-catalog) -- lihat komentar di run_baseline.py"
+        "Ranking metrics (Precision/Recall/NDCG@K) SENGAJA TIDAK dihitung/"
+        "dilaporkan (Temuan A1, reports/methodology_audit_2026-07-26.md) -- "
+        "candidate set per user tidak bermakna (mayoritas user cuma py 1 "
+        "item test). RMSE/MAE murni regresi, tidak terpengaruh isu ini."
     )
     if not cbf_include_sentiment:
         # Ablasi CBF-tanpa-sentimen (Invarian #4: file TERPISAH, tidak menimpa
@@ -381,9 +363,6 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
         "n_test_samples": int(len(test_df)),
         "rmse": rmse,
         "mae": mae,
-        "precision_at_k": {int(k): v for k, v in precision_k.items()},
-        "recall_at_k": {int(k): v for k, v in recall_k.items()},
-        "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
         "notes": notes,
     }
     save_results_yaml(results_path, results_summary, config=config)

@@ -49,7 +49,6 @@ from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig
 from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,
-    precision_recall_ndcg_at_k,
     log_stream_diagnostics,
     sanity_check_rmse,
     save_predictions,
@@ -543,26 +542,11 @@ def run_pipeline(
     logger.info("MAE : %.4f", mae)
     logger.info("=" * 60)
 
-    logger.info("Menghitung ranking metrics (Precision/Recall/NDCG@K)...")
-    test_df_eval = test_df.copy()
-    test_df_eval["pred_score"] = test_final_preds
-
-    relevance_threshold = 4.0
-    ranked_items_per_user: dict = {}
-    relevant_items_per_user: dict = {}
-    for user_id, group in test_df_eval.groupby("user_id"):
-        ranked = group.sort_values("pred_score", ascending=False)["business_id"].tolist()
-        ranked_items_per_user[user_id] = ranked
-        relevant = set(group[group["stars"] >= relevance_threshold]["business_id"])
-        relevant_items_per_user[user_id] = relevant
-
-    k_values = config["evaluation"]["k_values"]
-    precision_k, recall_k, ndcg_k = precision_recall_ndcg_at_k(
-        ranked_items_per_user, relevant_items_per_user, k_values
-    )
-    logger.info("Precision@K: %s", precision_k)
-    logger.info("Recall@K   : %s", recall_k)
-    logger.info("NDCG@K     : %s", ndcg_k)
+    # Ranking metrics (Precision/Recall/NDCG@K) DINONAKTIFKAN (Temuan A1,
+    # reports/methodology_audit_2026-07-26.md) -- lihat komentar identik di
+    # run_baseline.py utk alasan lengkap (candidate set per user tidak
+    # bermakna, mayoritas user cuma py 1 item test). RMSE/MAE di bawah tetap
+    # valid.
 
     results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -577,9 +561,7 @@ def run_pipeline(
             "digeneralisasi terima input multi-kolom, tidak ada perubahan perilaku "
             "lain), sentiment_score global diganti VEKTOR skor per-aspek ABSA "
             "(TANPA agregasi/rata-rata) langsung ke fusion -- CBF tetap pakai 1 "
-            "skor turunan (rata-rata kolom aspek) untuk sentiment_agg. Ranking "
-            "metrics pakai candidate set terbatas ke item test set -- lihat "
-            "run_baseline.py.",
+            "skor turunan (rata-rata kolom aspek) untuk sentiment_agg.",
         ),
         "confidence_mean": (
             "absa_ablation_confidence_mean",
@@ -590,9 +572,7 @@ def run_pipeline(
             "confidence-aware weighting (pendekatan dari paper IEEE penulis "
             "sebelumnya) memperbaiki kegagalan mode 'mean' polos. Confidence dari "
             "margin skor + jumlah kalimat bukti per aspek, lihat "
-            "score_dataframe_confidence_weighted() di absa_bert.py. Ranking "
-            "metrics pakai candidate set terbatas ke item test set -- lihat "
-            "run_baseline.py.",
+            "score_dataframe_confidence_weighted() di absa_bert.py.",
         ),
         "concat_confidence": (
             "absa_ablation_concat_confidence",
@@ -603,9 +583,7 @@ def run_pipeline(
             "aspek sbg fitur EKSTRA, bukan utk agregasi) langsung ke fusion -- "
             "menguji apakah confidence sbg sinyal eksplisit per-baris membantu "
             "DecisionTree di atas mode 'concat' polos. CBF tetap pakai 1 skor "
-            "turunan (rata-rata kolom SKOR aspek saja) utk sentiment_agg. "
-            "Ranking metrics pakai candidate set terbatas ke item test set -- "
-            "lihat run_baseline.py.",
+            "turunan (rata-rata kolom SKOR aspek saja) utk sentiment_agg.",
         ),
         "mean": (
             "absa_ablation",
@@ -613,9 +591,7 @@ def run_pipeline(
             "Varian ablasi: sama persis pipeline baseline_reimpl (DeepMF+CBF+"
             "NMF/DT, tidak diubah), sentiment_score diganti skor ABSA "
             "keyword-based (bukan SA global) di SEMUA tempat pipeline "
-            "memakainya (termasuk sentiment_agg di CBF). Ranking metrics "
-            "pakai candidate set terbatas ke item test set -- lihat "
-            "run_baseline.py.",
+            "memakainya (termasuk sentiment_agg di CBF).",
         ),
     }
     results_prefix, model_name, notes = mode_meta.get(absa_mode, mode_meta["mean"])
@@ -677,9 +653,6 @@ def run_pipeline(
         "n_test_samples": int(len(test_df)),
         "rmse": rmse,
         "mae": mae,
-        "precision_at_k": {int(k): v for k, v in precision_k.items()},
-        "recall_at_k": {int(k): v for k, v in recall_k.items()},
-        "ndcg_at_k": {int(k): v for k, v in ndcg_k.items()},
         "aspect_coverage": coverage_report,
         "notes": notes,
     }
