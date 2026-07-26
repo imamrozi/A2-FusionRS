@@ -1,87 +1,72 @@
 """
 scripts/tune_deepmf_oof_val.py
 
-Tuning DeepMF yang BENAR (lihat Temuan 10, memori sesi): val RMSE dari
-single-fit sederhana (scripts/tune_deepmf_cbf_pilot.py) TERBUKTI TIDAK
-RELIABLE sbg proxy performa pipeline sungguhan -- config yang tampak lebih
-baik di situ (learning_rate 0,005) justru RMSE test-nya memburuk 38,6%
-lewat pipeline penuh, krn pipeline sungguhan memakai
-`compute_oof_predictions()` (5-fold OOF, ~80% data/fold) utk
-`train_deepmf_preds`, BUKAN satu model dilatih full data spt di pilot.
+Tuning DeepMF yang BENAR -- riwayat perbaikan bertahap (lihat memori sesi
+utk detail lengkap tiap temuan):
 
-Script ini mensimulasikan REGIME YANG SAMA PERSIS dgn deployment (OOF utk
-stream train, model penuh utk stream held-out) TAPI held-out di sini
-adalah VAL, BUKAN TEST -- test_df TIDAK PERNAH dimuat sama sekali di
-script ini.
+1. (Temuan 10) val RMSE dari single-fit sederhana TIDAK RELIABLE sbg proxy
+   performa pipeline sungguhan -- diperbaiki dgn regime OOF+LOO yg sama
+   persis dgn deployment.
+2. (Temuan 13) SEKALIPUN regime OOF+LOO benar, pencarian 24-kandidat
+   SEKALIGUS (coordinate search tanpa jeda verifikasi) tetap gagal --
+   config pemenang di val RMSE-nya JUSTRU LEBIH BURUK di test. Diperbaiki
+   dgn eksekusi bertahap per-stage + verifikasi test wajib di antaranya.
+3. (Temuan B4 audit metodologi) coordinate search py bug: pemenang stage
+   tdk dibandingkan ke basis dari stage sebelumnya. Diperbaiki dgn
+   `--base-rmse` + perbandingan eksplisit.
+4. **(Temuan A2 audit metodologi, INI YANG DIPERBAIKI DI VERSI INI, PALING
+   MENDASAR)**: SEKALIPUN 1-3 sudah benar, ternyata val_df dipakai GANDA --
+   `DeepMFTrainer.fit()` melakukan early-stopping BERDASARKAN val (simpan/
+   restore bobot dgn val RMSE terbaik), LALU model yg SUDAH "mengintip"
+   val itu DIEVALUASI LAGI di val yg SAMA utk memilih kandidat. Ini bias
+   optimistik sistematis yg BESARNYA BEDA antar kandidat -- penjelasan
+   MEKANISTIS kenapa val & test 3x berturut-turut berlawanan arah (Temuan
+   13, 16, 18), bukan sekadar "val kecil/noisy".
 
-PERINGATAN KERAS (Temuan 13, lihat memori sesi): SEKALIPUN regime OOF+LOO
-sudah benar & val dipakai (bukan test), pencarian 24-kandidat PERTAMA
-(coordinate search murni learning_rate/embedding_dim/dropout/epochs)
-TETAP GAGAL -- config pemenang di val (RMSE 0,9317) justru RMSE TEST-nya
-LEBIH BURUK dari default (1,3065 vs 1,1183). Root cause diduga: val set
-kecil (3.487 baris) + 24 percobaan pada metrik yg noisy (variansi run-to-
-run besar) = val-set overfitting/multiple-comparisons, BUKAN perbaikan
-general. KONSEKUENSI DESAIN: script ini SEKARANG wajib dijalankan
-BERTAHAP per stage (--stages), BUKAN semua stage sekaligus tanpa jeda --
-verifikasi ke test SETELAH stage optimizer/lr selesai, SEBELUM lanjut ke
-stage embedding_dim/dropout/epochs, supaya tidak menghabiskan budget
-komputasi memperluas config yang ternyata ilusi.
+FIX A2 (perubahan utama versi ini): PISAHKAN peran early-stopping vs
+seleksi kandidat ke DUA set yang independen, TANPA menyentuh file split
+bersama (train/val/test tetap dipakai apa adanya oleh SEMUA script lain):
 
-STAGE 0 (BARU, axis yang belum pernah dicoba): optimizer. DeepMFTrainer
-SEBELUMNYA hardcode SGD polos (tanpa momentum/weight_decay) -- src/
-baseline/deepmf.py baris ~154, terbukti SANGAT sensitif thd learning_rate
-(band stabil sempit, kolaps total ke prediktor konstan di lr yg naik
-sedikit -- lr=0,003 val RMSE 0,93 -> lr=0,005 val RMSE 3,07). Adam/AdamW
-kini didukung (DeepMFConfig.optimizer). Stage 0 mencoba optimizer x
-learning_rate SEKALIGUS (bukan terpisah spt stage lr lama) krn dua-duanya
-diketahui berinteraksi kuat.
+  - `train_fit` (~85% dari train_df asli): dipakai fit CBF, fit DeepMF
+    (OOF + model penuh) -- pengganti peran "train" utk pencarian ini SAJA.
+  - `val_df` (split asli, TIDAK diubah): PERANNYA DIPERSEMPIT -- HANYA
+    dipakai early-stopping DeepMF (spt semula), TIDAK PERNAH lagi dipakai
+    menilai/membandingkan kandidat.
+  - `selection_dev` (~15% dari train_df asli, split SEKALI di awal,
+    deterministik thd seed): set BARU, independen dari early-stopping DAN
+    dari fitting -- CBF & DeepMF (OOF maupun model penuh) TIDAK PERNAH
+    melihat baris ini saat fit. Berperan sbg "test palsu" murni utk
+    seleksi kandidat. Predict di sini SELALU pakai method genuinely-out-
+    of-sample (`predict()` biasa, BUKAN `predict_train_loo()`/OOF) --
+    analog persis test_df di pipeline sungguhan.
 
-Protokol tiap kandidat (biaya ~sama dgn 1 run pipeline penuh, ~15-18 menit
-lokal CPU):
-1. compute_oof_predictions(train_df, ...) -> train_deepmf_preds (5-fold OOF)
-2. DeepMFTrainer baru, fit(train, val) -> predict(val_df) -> val_deepmf_preds
-   (model PENUH, analog persis test_deepmf_preds di pipeline sungguhan)
-3. CBF: predict_train_loo(train_df) -> train_cbf_preds ; predict(val_df) ->
-   val_cbf_preds -- CBF DIFIT SEKALI SAJA (independen dari hyperparameter
-   DeepMF), di-reuse lintas SEMUA kandidat DeepMF.
-4. sentiment: KOLOM KONSTAN nol (protokol no_sentiment_ablation) -- isolasi
-   murni kontribusi DeepMF+CBF.
-5. Fusion NMF+DT: fit(train_deepmf_preds, train_cbf_preds, sentiment=0,
-   y=train_df.stars) -> predict(val_deepmf_preds, val_cbf_preds,
-   sentiment=0) -> val_fusion_rmse. Metrik seleksi kandidat DI DALAM 1
-   stage -- TAPI keputusan LANJUT/TIDAK ke stage berikutnya WAJIB
-   diverifikasi dulu ke test set via run_baseline_absa.py --results-tag,
-   BUKAN otomatis dipercaya dari val_fusion_rmse saja (lihat peringatan
-   di atas).
+test_df ASLI tetap TIDAK PERNAH dimuat sama sekali di script ini -- WAJIB
+diverifikasi SEKALI lewat run_baseline_absa.py --results-tag SETELAH
+pencarian ini selesai, spt sebelumnya.
 
-RESUMABLE: checkpoint CSV (kolom: stage, params_json, val_fusion_rmse,
-seconds) -- restart skip kandidat yang params_json-nya sudah ada persis
-sama di CSV untuk stage yang sama.
+Protokol tiap kandidat (biaya ~sama dgn 1 run pipeline penuh):
+1. compute_oof_predictions(train_fit, ...) -> train_deepmf_preds (5-fold OOF,
+   early-stopping tiap fold pakai val_df).
+2. DeepMFTrainer baru, fit(train_fit, val_df utk early-stop) ->
+   predict(selection_dev) -> dev_deepmf_preds.
+3. CBF: predict_train_loo(train_fit) -> train_cbf_preds ; predict(selection_dev)
+   -> dev_cbf_preds (CBF difit SEKALI di awal, pakai train_fit+val_df SAJA
+   utk item universe -- selection_dev TIDAK PERNAH masuk fit CBF).
+4. sentiment: kolom konstan nol (protokol no_sentiment_ablation).
+5. Fusion: fit di (train_deepmf_preds, train_cbf_preds) -> predict di
+   (dev_deepmf_preds, dev_cbf_preds) -> dev_fusion_rmse. INI metrik
+   seleksi kandidat -- val_df TIDAK MUNCUL SAMA SEKALI di metrik ini lagi.
 
-PENTING (Temuan B4 audit metodologi, reports/methodology_audit_2026-07-26.md):
-SETIAP stage LANJUTAN (bukan stage pertama dlm satu invocation) WAJIB diisi
-`--base-rmse` dgn val_fusion_rmse dari config basis SAAT INI -- TANPA ini,
-script cuma bandingkan sesama kandidat BARU dlm satu stage, tidak pernah
-cross-check ke basis dari stage sebelumnya, dan bisa "memenangkan" kandidat
-yg sebenarnya LEBIH BURUK dari basis (ini PERSIS yg terjadi historisnya di
-stage_adamw_epochs sebelum fix ini ada).
+RESUMABLE: checkpoint CSV v3 (kolom: stage, params_json, dev_fusion_rmse,
+seconds) -- NAMA BEDA dari checkpoint v2 (skema lama msh pakai val_fusion_
+rmse yg tercemar Temuan A2, TIDAK backward compatible & TIDAK VALID utk
+dipercaya lagi -- lihat memori sesi).
 
 Usage (Colab, GPU disarankan):
-    # Stage 0 SAJA dulu (optimizer x lr) -- run pertama, tidak ada basis
-    # diketahui, --base-rmse tidak perlu diisi. WAJIB diverifikasi ke test
-    # sebelum lanjut stage lain.
     python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage0_optimizer_lr
 
-    # Stage lanjutan (embedding_dim/dropout/epochs), pakai optimizer+lr
-    # pemenang stage 0 sbg basis -- override manual via --base-optimizer/--base-lr
-    # DAN --base-rmse (val_fusion_rmse config itu dari checkpoint stage0).
-    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage1_embedding_dim,stage2_dropout,stage3_epochs --base-optimizer adam --base-learning-rate 0.001 --base-rmse 0.9803
-
-    # Stage AdamW lanjutan (contoh, isi --base-rmse dgn angka checkpoint yg
-    # sesuai basis yg dipakai):
-    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_epochs --base-optimizer adamw --base-learning-rate 0.002 --base-rmse 0.9803 --cbf-pca-components 90
-    # setelah verifikasi test stage_adamw_epochs, lanjut (isi --base-epochs manual dgn pemenang):
-    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_weight_decay --base-optimizer adamw --base-learning-rate 0.002 --base-epochs <pemenang> --cbf-pca-components 90
+    # Stage lanjutan, isi --base-rmse dgn dev_fusion_rmse checkpoint stage sebelumnya:
+    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage1_embedding_dim --base-optimizer adamw --base-learning-rate 0.002 --base-rmse <isi>
 """
 
 from __future__ import annotations
@@ -116,10 +101,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 RATING_SCALE = (1.0, 5.0)
+SELECTION_DEV_FRACTION = 0.15  # porsi train_df asli disisihkan jadi selection_dev
 
 DEFAULTS = {
-    "optimizer": "sgd",
-    "learning_rate": 0.001,
+    "optimizer": "adamw",
+    "learning_rate": 0.002,
     "embedding_dim": 128,
     "hidden_layers": (256, 128, 64, 32),
     "dropout": 0.3,
@@ -127,18 +113,9 @@ DEFAULTS = {
     "weight_decay": 0.0,
 }
 
-# Stage 0: optimizer x learning_rate SEKALIGUS (interaksi kuat, tidak bisa
-# dipisah spt coordinate search murni). 2 anchor SGD (default + "pemenang"
-# lama yg TERBUKTI gagal di test, Temuan 13 -- disertakan lagi di sini
-# sbg pembanding langsung dlm skema checkpoint baru) + Adam/AdamW di
-# beberapa lr yg relevan (skala umum Adam-family, 5e-4 s/d 5e-3).
 STAGE0_OPTIMIZER_LR: list[dict] = [
     {"optimizer": "sgd", "learning_rate": 0.001},
     {"optimizer": "sgd", "learning_rate": 0.003},
-    {"optimizer": "adam", "learning_rate": 0.0005},
-    {"optimizer": "adam", "learning_rate": 0.001},
-    {"optimizer": "adam", "learning_rate": 0.002},
-    {"optimizer": "adam", "learning_rate": 0.005},
     {"optimizer": "adamw", "learning_rate": 0.0005},
     {"optimizer": "adamw", "learning_rate": 0.001},
     {"optimizer": "adamw", "learning_rate": 0.002},
@@ -149,21 +126,30 @@ ALL_STAGES: dict[str, list[dict]] = {
     "stage0_optimizer_lr": STAGE0_OPTIMIZER_LR,
     "stage1_embedding_dim": [{"embedding_dim": v} for v in [32, 64, 96, 128, 192, 256]],
     "stage2_dropout": [{"dropout": v} for v in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]],
-    "stage3_epochs": [{"epochs": v} for v in [20, 30, 40, 50]],
-    # Stage khusus AdamW (Temuan 16, memori sesi): verifikasi test Adam
-    # lr=0,002/epochs=20 near-miss (test RMSE 1,1309 vs default 1,1183,
-    # +1,1%) -- log training tunjukkan train MSE turun sampai 0,002 sementara
-    # val RMSE BEROSILASI (tidak monoton lg) -- diagnosis overfitting jelas,
-    # epochs=20 (diwarisi era tuning SGD) kemungkinan kelewat banyak utk
-    # Adam yg konvergen jauh lbh cepat. 20 SENGAJA tidak diulang di sini
-    # (sudah py hasil dari stage0). Jalankan dgn --base-optimizer adamw
-    # --base-learning-rate 0.002 SETELAH stage_adamw_epochs selesai &
-    # diverifikasi ke test, baru lanjut stage_adamw_weight_decay (0,0
-    # SENGAJA tdk diulang -- itu PERSIS Adam lr=0,002 yg sudah py hasil,
-    # weight_decay=0 membuat AdamW == Adam scr matematis, lihat Temuan 15).
-    "stage_adamw_epochs": [{"epochs": v} for v in [3, 5, 8, 12]],
-    "stage_adamw_weight_decay": [{"weight_decay": v} for v in [0.0001, 0.001, 0.01, 0.05]],
+    "stage3_epochs": [{"epochs": v} for v in [5, 10, 15, 20, 30]],
+    "stage4_weight_decay": [{"weight_decay": v} for v in [0.0001, 0.001, 0.01, 0.05]],
 }
+
+
+def split_train_fit_dev(train_df: pd.DataFrame, seed: int, dev_fraction: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Pisah train_df asli jadi train_fit (fitting) + selection_dev (seleksi
+    kandidat) -- SEKALI, deterministik thd seed, row-based (bukan user-based
+    spt split_generator.py; ini split INTERNAL khusus script ini, TIDAK
+    menyentuh/menggantikan file split bersama). Lihat docstring modul utk
+    alasan lengkap (Fix Temuan A2).
+    """
+    rng = np.random.RandomState(seed)
+    shuffled_idx = rng.permutation(len(train_df))
+    n_dev = int(len(train_df) * dev_fraction)
+    dev_idx = shuffled_idx[:n_dev]
+    fit_idx = shuffled_idx[n_dev:]
+    train_fit = train_df.iloc[fit_idx].reset_index(drop=True)
+    selection_dev = train_df.iloc[dev_idx].reset_index(drop=True)
+    logger.info(
+        "split_train_fit_dev: train_fit=%d baris, selection_dev=%d baris (%.1f%% dari train asli %d baris)",
+        len(train_fit), len(selection_dev), 100.0 * dev_fraction, len(train_df),
+    )
+    return train_fit, selection_dev
 
 
 def load_checkpoint(csv_path: Path) -> dict[tuple[str, str], float]:
@@ -172,7 +158,7 @@ def load_checkpoint(csv_path: Path) -> dict[tuple[str, str], float]:
     done = {}
     with open(csv_path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            done[(row["stage"], row["params_json"])] = float(row["val_fusion_rmse"])
+            done[(row["stage"], row["params_json"])] = float(row["dev_fusion_rmse"])
     return done
 
 
@@ -187,8 +173,9 @@ def append_checkpoint(csv_path: Path, row: dict) -> None:
 
 def evaluate_candidate(
     params: dict,
-    train_df, val_df, user2idx, item2idx, n_items,
-    train_cbf_preds: np.ndarray, val_cbf_preds: np.ndarray,
+    train_fit: pd.DataFrame, val_df: pd.DataFrame, selection_dev: pd.DataFrame,
+    user2idx: dict, item2idx: dict, n_items: int,
+    train_cbf_preds: np.ndarray, dev_cbf_preds: np.ndarray,
     seed: int,
 ) -> float:
     torch.manual_seed(seed)
@@ -203,34 +190,36 @@ def evaluate_candidate(
         optimizer=params["optimizer"],
         weight_decay=params["weight_decay"],
     )
+    # val_df HANYA utk early-stopping (Fix Temuan A2) -- tidak pernah
+    # dipakai lagi sbg target evaluasi kandidat di bawah.
     val_interactions = InteractionDataset(val_df, user2idx, item2idx, n_items, negative_ratio=0, seed=seed)
 
     train_deepmf_preds = compute_oof_predictions(
-        train_df, val_interactions, user2idx, item2idx, n_items, config, RATING_SCALE, seed=seed,
+        train_fit, val_interactions, user2idx, item2idx, n_items, config, RATING_SCALE, seed=seed,
     )
 
     torch.manual_seed(seed)
     train_interactions = InteractionDataset(
-        train_df, user2idx, item2idx, n_items, config.negative_sampling_ratio, seed=seed,
+        train_fit, user2idx, item2idx, n_items, config.negative_sampling_ratio, seed=seed,
     )
     trainer = DeepMFTrainer(len(user2idx), n_items, config)
-    trainer.fit(train_interactions, val_interactions)
-    val_deepmf_preds = trainer.predict(val_df, user2idx, item2idx, RATING_SCALE)
+    trainer.fit(train_interactions, val_interactions)  # val_df early-stop DI SINI SAJA
+    dev_deepmf_preds = trainer.predict(selection_dev, user2idx, item2idx, RATING_SCALE)
 
-    train_sentiment = np.zeros(len(train_df), dtype=np.float32)
-    val_sentiment = np.zeros(len(val_df), dtype=np.float32)
+    train_sentiment = np.zeros(len(train_fit), dtype=np.float32)
+    dev_sentiment = np.zeros(len(selection_dev), dtype=np.float32)
 
     fusion = NMFDecisionTreeFusion(FusionConfig(nmf_components=3, dt_max_depth=10, random_state=seed))
     fusion.fit(
         sentiment_scores=train_sentiment, deepmf_preds=train_deepmf_preds,
-        cbf_preds=train_cbf_preds, y_true_ratings=train_df["stars"].values,
+        cbf_preds=train_cbf_preds, y_true_ratings=train_fit["stars"].values,
     )
-    val_final_preds = fusion.predict(
-        sentiment_scores=val_sentiment, deepmf_preds=val_deepmf_preds, cbf_preds=val_cbf_preds,
+    dev_final_preds = fusion.predict(
+        sentiment_scores=dev_sentiment, deepmf_preds=dev_deepmf_preds, cbf_preds=dev_cbf_preds,
     )
-    val_final_preds = np.clip(val_final_preds, RATING_SCALE[0], RATING_SCALE[1])
+    dev_final_preds = np.clip(dev_final_preds, RATING_SCALE[0], RATING_SCALE[1])
 
-    rmse, _ = compute_rmse_mae(val_df["stars"].values, val_final_preds)
+    rmse, _ = compute_rmse_mae(selection_dev["stars"].values, dev_final_preds)
     return float(rmse)
 
 
@@ -243,39 +232,18 @@ def main() -> None:
     )
     parser.add_argument(
         "--stages", type=str, default="stage0_optimizer_lr",
-        help="Daftar stage dipisah koma, dijalankan BERURUTAN sesuai urutan disebut "
-        "(bukan urutan ALL_STAGES). Default HANYA stage0_optimizer_lr -- WAJIB "
-        "diverifikasi ke test set dulu (run_baseline_absa.py --results-tag) sebelum "
-        "menjalankan stage lain, lihat peringatan di docstring. Pilihan: " +
-        ", ".join(ALL_STAGES.keys()),
+        help="Daftar stage dipisah koma, dijalankan BERURUTAN. Default HANYA "
+        "stage0_optimizer_lr -- WAJIB diverifikasi ke test set dulu sebelum "
+        "menjalankan stage lain. Pilihan: " + ", ".join(ALL_STAGES.keys()),
     )
-    parser.add_argument(
-        "--base-optimizer", type=str, default=None,
-        help="Override optimizer basis utk stage1-3 (default: DEFAULTS['optimizer'] "
-        "kalau tidak diisi -- isi manual dgn pemenang stage0 yg SUDAH diverifikasi ke test).",
-    )
+    parser.add_argument("--base-optimizer", type=str, default=None)
     parser.add_argument("--base-learning-rate", type=float, default=None)
-    parser.add_argument(
-        "--base-epochs", type=int, default=None,
-        help="Override epochs basis (mis. utk stage_adamw_weight_decay, isi dgn "
-        "pemenang stage_adamw_epochs yg sudah diverifikasi ke test).",
-    )
-    parser.add_argument(
-        "--base-weight-decay", type=float, default=None,
-        help="Override weight_decay basis.",
-    )
+    parser.add_argument("--base-epochs", type=int, default=None)
+    parser.add_argument("--base-weight-decay", type=float, default=None)
     parser.add_argument(
         "--base-rmse", type=float, default=None,
-        help="val_fusion_rmse basis SAAT INI (mis. isi dgn val_fusion_rmse dari config "
-        "--base-optimizer/--base-learning-rate/dst di atas, kalau sudah pernah diukur di "
-        "stage/run sebelumnya) -- WAJIB diisi kalau melanjutkan dari stage lain (bukan "
-        "run pertama), lihat Temuan B4 audit metodologi (reports/methodology_audit_"
-        "2026-07-26.md): TANPA ini, script cuma bandingkan sesama kandidat BARU dlm satu "
-        "stage, TIDAK PERNAH cross-check ke baseline yg dibawa dari stage sebelumnya --"
-        "bisa 'memenangkan' kandidat yg sebenarnya LEBIH BURUK dari basis (persis yg "
-        "terjadi di stage_adamw_epochs: epochs=5 dilaporkan 'menang' padahal epochs=20 "
-        "basis msh lbh baik). Kalau kosong (run pertama, tidak py basis diketahui), stage "
-        "PERTAMA diterima apa adanya (tidak ada yg dibandingkan).",
+        help="dev_fusion_rmse basis SAAT INI dari checkpoint stage sebelumnya -- WAJIB "
+        "diisi kalau melanjutkan dari stage lain (bukan run pertama), lihat Temuan B4.",
     )
     args = parser.parse_args()
 
@@ -288,12 +256,10 @@ def main() -> None:
 
     checkpoint_dir = Path(config["logging"]["checkpoint_dir"])
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    # NAMA BEDA dari checkpoint pencarian LAMA (tuning_deepmf_oof_val_search.csv,
-    # skema kolom param_name/param_value, coordinate search 24-kandidat yg
-    # gagal di test -- Temuan 12/13) -- skema checkpoint script ini beda
-    # (params_json), TIDAK backward compatible, sengaja file terpisah supaya
-    # riwayat pencarian lama tetap ada & tidak collision/corrupt.
-    csv_path = checkpoint_dir / "tuning_deepmf_oof_val_search_v2.csv"
+    # v3: skema BEDA dari v2 (val_fusion_rmse, tercemar Temuan A2 -- val
+    # dipakai ganda utk early-stop DAN seleksi). v3 pakai dev_fusion_rmse
+    # dari selection_dev yg independen. TIDAK backward compatible dgn v2.
+    csv_path = checkpoint_dir / "tuning_deepmf_oof_dev_search_v3.csv"
     done = load_checkpoint(csv_path)
     logger.info("Checkpoint: %d kandidat sudah selesai sebelumnya (resume dari %s)", len(done), csv_path)
 
@@ -306,23 +272,32 @@ def main() -> None:
     train_df = preprocessor.preprocess_dataframe(train_df)
     val_df = preprocessor.preprocess_dataframe(val_df)
 
+    # Fix Temuan A2: pisah train_df jadi train_fit (fitting) + selection_dev
+    # (seleksi kandidat, independen dari early-stopping val_df).
+    train_fit, selection_dev = split_train_fit_dev(train_df, seed, SELECTION_DEV_FRACTION)
+
     all_users = pd.concat([train_df["user_id"], val_df["user_id"]]).unique()
     all_items = pd.concat([train_df["business_id"], val_df["business_id"]]).unique()
     user2idx = {u: i for i, u in enumerate(all_users)}
     item2idx = {b: i for i, b in enumerate(all_items)}
 
     logger.info("=== Fit CBF sekali (pca_components=%d, reuse lintas kandidat DeepMF) ===", args.cbf_pca_components)
-    train_df_cbf = train_df.copy()
-    train_df_cbf["sentiment_score"] = 0.5
-    full_df_for_items = pd.concat([train_df, val_df], ignore_index=True)
+    train_fit_cbf = train_fit.copy()
+    train_fit_cbf["sentiment_score"] = 0.5
+    # full_df_for_items HANYA train_fit + val_df -- selection_dev SENGAJA
+    # TIDAK dimasukkan, supaya benar2 unseen oleh CBF (analog persis test_df
+    # di pipeline sungguhan, bukan sekadar LOO-corrected train row).
+    full_df_for_items = pd.concat([train_fit, val_df], ignore_index=True)
     cbf_config = CBFConfig(
         method=config["cbf_clustering"]["method"], k_min=2, k_max=20,
         pca_components=args.cbf_pca_components, random_state=seed, include_sentiment=False,
     )
     cbf_predictor = CBFPredictor(cbf_config=cbf_config)
-    cbf_predictor.fit(full_df_for_items, train_df_cbf)
-    train_cbf_preds = cbf_predictor.predict_train_loo(train_df, RATING_SCALE)
-    val_cbf_preds = cbf_predictor.predict(val_df, RATING_SCALE)
+    cbf_predictor.fit(full_df_for_items, train_fit_cbf)
+    train_cbf_preds = cbf_predictor.predict_train_loo(train_fit, RATING_SCALE)
+    # selection_dev: predict() BIASA (bukan LOO) -- baris ini tidak pernah
+    # masuk fit CBF sama sekali, genuinely out-of-sample spt test_df asli.
+    dev_cbf_preds = cbf_predictor.predict(selection_dev, RATING_SCALE)
 
     current_best = dict(DEFAULTS)
     if args.base_optimizer is not None:
@@ -333,7 +308,7 @@ def main() -> None:
         current_best["epochs"] = args.base_epochs
     if args.base_weight_decay is not None:
         current_best["weight_decay"] = args.base_weight_decay
-    current_best_rmse = args.base_rmse  # None -> stage pertama, tidak ada basis diketahui
+    current_best_rmse = args.base_rmse
     n_items = len(all_items)
 
     stage_names = [s.strip() for s in args.stages.split(",") if s.strip()]
@@ -342,7 +317,7 @@ def main() -> None:
             raise ValueError(f"Stage '{stage_name}' tidak dikenal -- pilihan: {list(ALL_STAGES.keys())}")
         candidates = ALL_STAGES[stage_name]
         logger.info(
-            "=== %s (%d kandidat) -- basis: %s (val RMSE basis=%s) ===",
+            "=== %s (%d kandidat) -- basis: %s (dev RMSE basis=%s) ===",
             stage_name, len(candidates), current_best,
             f"{current_best_rmse:.4f}" if current_best_rmse is not None else "BELUM DIKETAHUI",
         )
@@ -354,56 +329,51 @@ def main() -> None:
             cache_key = (stage_name, params_key)
 
             if cache_key in done:
-                logger.info("[%s] %s SUDAH ADA di checkpoint (val RMSE=%.4f) -- skip.", stage_name, override, done[cache_key])
+                logger.info("[%s] %s SUDAH ADA di checkpoint (dev RMSE=%.4f) -- skip.", stage_name, override, done[cache_key])
                 stage_results.append((override, done[cache_key]))
                 continue
 
             t0 = time.time()
-            rmse = evaluate_candidate(params, train_df, val_df, user2idx, item2idx, n_items, train_cbf_preds, val_cbf_preds, seed)
+            rmse = evaluate_candidate(
+                params, train_fit, val_df, selection_dev, user2idx, item2idx, n_items,
+                train_cbf_preds, dev_cbf_preds, seed,
+            )
             elapsed = time.time() - t0
-            logger.info("[%s] %s val_fusion_RMSE=%.4f (%.1f menit)", stage_name, override, rmse, elapsed / 60)
+            logger.info("[%s] %s dev_fusion_RMSE=%.4f (%.1f menit)", stage_name, override, rmse, elapsed / 60)
             append_checkpoint(csv_path, {
                 "stage": stage_name, "params_json": params_key,
-                "val_fusion_rmse": rmse, "seconds": elapsed,
+                "dev_fusion_rmse": rmse, "seconds": elapsed,
             })
             stage_results.append((override, rmse))
 
         best_override, best_rmse = min(stage_results, key=lambda t: t[1])
 
-        # FIX Temuan B4 (audit metodologi): bandingkan pemenang stage ini ke
-        # BASIS yg dibawa dari stage/run sebelumnya (current_best_rmse), BUKAN
-        # cuma sesama kandidat baru dlm stage ini. Kalau tdk ada kandidat baru
-        # yg lebih baik dari basis, current_best TIDAK berubah -- stage ini
-        # dianggap "tidak menemukan perbaikan", bukan diam-diam ganti ke
-        # kandidat yg sebenarnya lebih buruk.
         if current_best_rmse is not None and best_rmse >= current_best_rmse:
             logger.warning(
                 "=== %s SELESAI: TIDAK ADA kandidat baru yg mengalahkan basis "
-                "(terbaik stage ini %s val RMSE=%.4f, vs basis val RMSE=%.4f) -- "
+                "(terbaik stage ini %s dev RMSE=%.4f, vs basis dev RMSE=%.4f) -- "
                 "current_best TIDAK diubah, tetap %s ===",
                 stage_name, best_override, best_rmse, current_best_rmse, current_best,
             )
         else:
             current_best.update(best_override)
             current_best_rmse = best_rmse
-            logger.info("=== %s SELESAI: terbaik = %s (val RMSE=%.4f) ===", stage_name, best_override, best_rmse)
+            logger.info("=== %s SELESAI: terbaik = %s (dev RMSE=%.4f) ===", stage_name, best_override, best_rmse)
 
     logger.info("=" * 60)
     logger.info("STAGE(S) SELESAI -- config DeepMF terbaik SEJAUH INI:")
     for k, v in current_best.items():
         logger.info("  %s = %s", k, v)
     logger.info(
-        "val_fusion_rmse basis: %s",
+        "dev_fusion_rmse basis: %s",
         f"{current_best_rmse:.4f}" if current_best_rmse is not None else "BELUM DIKETAHUI",
     )
     logger.info("CBF pca_components dipakai (ditala terpisah): %d", args.cbf_pca_components)
     logger.info("=" * 60)
     logger.info(
-        "WAJIB (lihat peringatan Temuan 13 di docstring): verifikasi config di atas "
-        "ke TEST SET SEKALI lewat run_baseline_absa.py --results-tag <tag> "
-        "--sentiment-protocol no_sentiment_ablation SEBELUM mempercayai val_fusion_rmse "
-        "di atas ATAU melanjutkan ke stage berikutnya. Val set kecil (3.487 baris di "
-        "domain hotel) rawan overfitting kalau banyak kandidat dicoba."
+        "WAJIB: verifikasi config di atas ke TEST SET SEKALI lewat run_baseline_absa.py "
+        "--results-tag <tag> --sentiment-protocol no_sentiment_ablation SEBELUM "
+        "mempercayai dev_fusion_rmse di atas ATAU melanjutkan ke stage berikutnya."
     )
 
 
