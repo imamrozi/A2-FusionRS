@@ -199,6 +199,11 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
         batch_size=config["deepmf"]["batch_size"],
         learning_rate=config["deepmf"]["learning_rate"],
         negative_sampling_ratio=config["deepmf"]["negative_sampling_ratio"],
+        # .get(..., "sgd"): field ini SEBELUMNYA ada di YAML tapi tidak
+        # pernah dibaca kode (dead config) -- default "sgd" menjaga config
+        # lama yg sudah ada tetap berperilaku identik (non-breaking).
+        optimizer=config["deepmf"].get("optimizer", "sgd"),
+        weight_decay=config["deepmf"].get("weight_decay", 0.0),
     )
 
     train_interactions = InteractionDataset(

@@ -1,17 +1,25 @@
 # configs/tripadvisor_hotel_config_absa_concat_confidence_tuned.yaml
-# Verifikasi Step 1 pilot tuning (scripts/tune_deepmf_cbf_pilot.py): DeepMF
-# learning_rate 0.001->0.005 (val RMSE 1,1236->0,9312, -17,1%) dan CBF
-# pca_components 50->70 (val RMSE 1,0199->1,0077, -1,2%) pada domain hotel.
-# Config ini pakai hyperparameter hasil pilot tsb, sisanya identik dgn
-# tripadvisor_hotel_config_absa_concat_confidence.yaml -- utk mengukur
-# dampak NYATA di test set stlh lewat fusion penuh (bukan cuma val RMSE
-# per-stream), dibandingkan hasil sebelum tuning (RMSE 0,6345/0,9565/1,1183
-# utk target_review/P3/no_sentiment).
+# Hasil pencarian coordinate 4-tahap via regime OOF+LOO yang benar
+# (scripts/tune_deepmf_oof_val.py, dievaluasi di VAL bukan test -- lihat
+# checkpoints/tripadvisor_hotel/tuning_deepmf_oof_val_search.csv):
+# learning_rate 0,001->0,003 (val_fusion_RMSE 1,3250->0,9317, -29,7%).
+# embedding_dim/hidden_layers/dropout/epochs semua KONVERGEN BALIK ke
+# default (128/[256,128,64,32]/0,3/20) -- tidak ada perbaikan di situ.
+#
+# CATATAN (versi SEBELUMNYA file ini, learning_rate=0,005 + pca=70, dari
+# pilot single-fit yang TERBUKTI TIDAK RELIABLE -- lihat memori sesi
+# "Temuan 10": config itu tampak lebih baik di val single-fit TAPI RMSE
+# test-nya MEMBURUK 38,6% lewat pipeline penuh krn regime mismatch OOF.
+# Nilai di file ini SUDAH DIKOREKSI, hasil pencarian yang benar.
+#
+# CBF pca_components=90 dari scripts/tune_deepmf_cbf_pilot.py --skip-deepmf
+# (val RMSE 0,9686 vs default 50 -> 1,0199, -5,0%) -- aman krn CBF bukan
+# model iteratif, tidak ada regime-mismatch spt DeepMF.
 
 _base: tripadvisor_hotel_config_absa_concat_confidence.yaml
 
 deepmf:
-  learning_rate: 0.005
+  learning_rate: 0.003
 
 cbf_clustering:
-  pca_components: 70
+  pca_components: 90

@@ -44,6 +44,16 @@ class DeepMFConfig:
     learning_rate: float = 0.001
     epochs: int = 20
     negative_sampling_ratio: int = 4
+    # "sgd" (default -- perilaku LAMA, sesuai Table 10 baseline paper) |
+    # "adam" | "adamw". Ditambah krn SGD polos (tanpa momentum/weight_decay)
+    # terbukti SANGAT sensitif thd learning_rate -- band stabil sempit,
+    # kolaps total ke prediktor konstan di lr yg cuma naik sedikit (lihat
+    # hasil tuning_deepmf_oof_val_search.csv: lr=0.003 val RMSE 0.93 ->
+    # lr=0.005 val RMSE 3.07, kolaps). Adam/AdamW jauh lebih toleran thd
+    # pilihan lr -- hipotesis: bisa menstabilkan training SEKALIGUS
+    # berpotensi hasil lbh baik dari default SGD.
+    optimizer: str = "sgd"
+    weight_decay: float = 0.0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -151,7 +161,25 @@ class DeepMFTrainer:
 
     def fit(self, train_dataset: InteractionDataset, val_dataset: InteractionDataset | None = None) -> None:
         loader = DataLoader(train_dataset, batch_size=self.config.batch_size, shuffle=True)
-        optimizer = torch.optim.SGD(self.model.parameters(), lr=self.config.learning_rate)
+        if self.config.optimizer == "sgd":
+            optimizer = torch.optim.SGD(
+                self.model.parameters(), lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            )
+        elif self.config.optimizer == "adam":
+            optimizer = torch.optim.Adam(
+                self.model.parameters(), lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            )
+        elif self.config.optimizer == "adamw":
+            optimizer = torch.optim.AdamW(
+                self.model.parameters(), lr=self.config.learning_rate,
+                weight_decay=self.config.weight_decay,
+            )
+        else:
+            raise ValueError(
+                f"optimizer '{self.config.optimizer}' tidak dikenal -- pakai 'sgd'/'adam'/'adamw'."
+            )
         criterion = nn.MSELoss()
 
         # Model DeepMF ini cenderung overfit setelah beberapa epoch awal

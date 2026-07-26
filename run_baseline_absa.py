@@ -67,6 +67,7 @@ def run_pipeline(
     config: dict,
     cbf_include_sentiment: bool = False,
     sentiment_protocol: str = "target_review",
+    results_tag: str = "",
 ) -> None:
     exp_cfg = config["experiment"]
     data_cfg = config["data"]
@@ -354,6 +355,8 @@ def run_pipeline(
         batch_size=config["deepmf"]["batch_size"],
         learning_rate=config["deepmf"]["learning_rate"],
         negative_sampling_ratio=config["deepmf"]["negative_sampling_ratio"],
+        optimizer=config["deepmf"].get("optimizer", "sgd"),
+        weight_decay=config["deepmf"].get("weight_decay", 0.0),
     )
 
     train_interactions = InteractionDataset(
@@ -625,6 +628,15 @@ def run_pipeline(
             "DeepMF (OOF) + CBF (LOO) SENDIRIAN, tanpa sinyal sentimen sama "
             "sekali."
         )
+    if results_tag:
+        # Tag hyperparameter/varian config bebas (mis. "tuned") -- MENCEGAH
+        # run dgn hyperparameter berbeda (tapi absa_mode/cbf_include_sentiment/
+        # sentiment_protocol SAMA) tanpa sengaja menimpa file hasil satu sama
+        # lain (lihat kejadian no_sentiment_ablation tertimpa saat verifikasi
+        # config tuned pertama). Default "" -- perilaku lama TIDAK berubah.
+        results_prefix = f"{results_prefix}_{results_tag}"
+        model_name = f"{model_name}_{results_tag}"
+        notes = notes + f" [results_tag={results_tag}]"
     results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
     results_summary = {
@@ -696,6 +708,16 @@ if __name__ == "__main__":
         "disimpan ke prefix terpisah per protokol, TIDAK menimpa hasil "
         "target_review.",
     )
+    parser.add_argument(
+        "--results-tag",
+        type=str,
+        default="",
+        help="Tag bebas ditambahkan ke prefix hasil/model_name (mis. 'tuned') -- "
+        "cegah run dgn hyperparameter berbeda (config _tuned.yaml dll, tapi "
+        "absa_mode/cbf_include_sentiment/sentiment_protocol SAMA) menimpa "
+        "hasil run lain tanpa sengaja. Default kosong -- perilaku lama TIDAK "
+        "berubah.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -705,4 +727,5 @@ if __name__ == "__main__":
         cfg,
         cbf_include_sentiment=args.include_cbf_sentiment,
         sentiment_protocol=args.sentiment_protocol,
+        results_tag=args.results_tag,
     )
