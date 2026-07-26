@@ -66,6 +66,15 @@ Usage (Colab, GPU disarankan):
     # Stage lanjutan (embedding_dim/dropout/epochs), pakai optimizer+lr
     # pemenang stage 0 sbg basis -- override manual via --base-optimizer/--base-lr
     python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage1_embedding_dim,stage2_dropout,stage3_epochs --base-optimizer adam --base-learning-rate 0.001
+
+    # Stage AdamW: Adam lr=0,002 (stage0) near-miss di test (1,1309 vs
+    # default 1,1183) dgn diagnosis overfitting jelas (train MSE ~0,002,
+    # val RMSE berosilasi) -- tala epochs dulu (kemungkinan optimal <20),
+    # BARU lanjut weight_decay pakai epochs pemenang (fitur khas AdamW yg
+    # blm pernah diuji, weight_decay=0 == Adam polos scr matematis).
+    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_epochs --base-optimizer adamw --base-learning-rate 0.002 --cbf-pca-components 90
+    # setelah verifikasi test stage_adamw_epochs, lanjut (isi --base-epochs manual dgn pemenang):
+    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_weight_decay --base-optimizer adamw --base-learning-rate 0.002 --base-epochs <pemenang> --cbf-pca-components 90
 """
 
 from __future__ import annotations
@@ -108,6 +117,7 @@ DEFAULTS = {
     "hidden_layers": (256, 128, 64, 32),
     "dropout": 0.3,
     "epochs": 20,
+    "weight_decay": 0.0,
 }
 
 # Stage 0: optimizer x learning_rate SEKALIGUS (interaksi kuat, tidak bisa
@@ -133,6 +143,19 @@ ALL_STAGES: dict[str, list[dict]] = {
     "stage1_embedding_dim": [{"embedding_dim": v} for v in [32, 64, 96, 128, 192, 256]],
     "stage2_dropout": [{"dropout": v} for v in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]],
     "stage3_epochs": [{"epochs": v} for v in [20, 30, 40, 50]],
+    # Stage khusus AdamW (Temuan 16, memori sesi): verifikasi test Adam
+    # lr=0,002/epochs=20 near-miss (test RMSE 1,1309 vs default 1,1183,
+    # +1,1%) -- log training tunjukkan train MSE turun sampai 0,002 sementara
+    # val RMSE BEROSILASI (tidak monoton lg) -- diagnosis overfitting jelas,
+    # epochs=20 (diwarisi era tuning SGD) kemungkinan kelewat banyak utk
+    # Adam yg konvergen jauh lbh cepat. 20 SENGAJA tidak diulang di sini
+    # (sudah py hasil dari stage0). Jalankan dgn --base-optimizer adamw
+    # --base-learning-rate 0.002 SETELAH stage_adamw_epochs selesai &
+    # diverifikasi ke test, baru lanjut stage_adamw_weight_decay (0,0
+    # SENGAJA tdk diulang -- itu PERSIS Adam lr=0,002 yg sudah py hasil,
+    # weight_decay=0 membuat AdamW == Adam scr matematis, lihat Temuan 15).
+    "stage_adamw_epochs": [{"epochs": v} for v in [3, 5, 8, 12]],
+    "stage_adamw_weight_decay": [{"weight_decay": v} for v in [0.0001, 0.001, 0.01, 0.05]],
 }
 
 
@@ -171,6 +194,7 @@ def evaluate_candidate(
         epochs=params["epochs"],
         negative_sampling_ratio=0,
         optimizer=params["optimizer"],
+        weight_decay=params["weight_decay"],
     )
     val_interactions = InteractionDataset(val_df, user2idx, item2idx, n_items, negative_ratio=0, seed=seed)
 
@@ -224,6 +248,15 @@ def main() -> None:
         "kalau tidak diisi -- isi manual dgn pemenang stage0 yg SUDAH diverifikasi ke test).",
     )
     parser.add_argument("--base-learning-rate", type=float, default=None)
+    parser.add_argument(
+        "--base-epochs", type=int, default=None,
+        help="Override epochs basis (mis. utk stage_adamw_weight_decay, isi dgn "
+        "pemenang stage_adamw_epochs yg sudah diverifikasi ke test).",
+    )
+    parser.add_argument(
+        "--base-weight-decay", type=float, default=None,
+        help="Override weight_decay basis.",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -276,6 +309,10 @@ def main() -> None:
         current_best["optimizer"] = args.base_optimizer
     if args.base_learning_rate is not None:
         current_best["learning_rate"] = args.base_learning_rate
+    if args.base_epochs is not None:
+        current_best["epochs"] = args.base_epochs
+    if args.base_weight_decay is not None:
+        current_best["weight_decay"] = args.base_weight_decay
     n_items = len(all_items)
 
     stage_names = [s.strip() for s in args.stages.split(",") if s.strip()]
