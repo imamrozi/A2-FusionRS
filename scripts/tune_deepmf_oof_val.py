@@ -58,21 +58,28 @@ RESUMABLE: checkpoint CSV (kolom: stage, params_json, val_fusion_rmse,
 seconds) -- restart skip kandidat yang params_json-nya sudah ada persis
 sama di CSV untuk stage yang sama.
 
+PENTING (Temuan B4 audit metodologi, reports/methodology_audit_2026-07-26.md):
+SETIAP stage LANJUTAN (bukan stage pertama dlm satu invocation) WAJIB diisi
+`--base-rmse` dgn val_fusion_rmse dari config basis SAAT INI -- TANPA ini,
+script cuma bandingkan sesama kandidat BARU dlm satu stage, tidak pernah
+cross-check ke basis dari stage sebelumnya, dan bisa "memenangkan" kandidat
+yg sebenarnya LEBIH BURUK dari basis (ini PERSIS yg terjadi historisnya di
+stage_adamw_epochs sebelum fix ini ada).
+
 Usage (Colab, GPU disarankan):
-    # Stage 0 SAJA dulu (optimizer x lr) -- WAJIB diverifikasi ke test
+    # Stage 0 SAJA dulu (optimizer x lr) -- run pertama, tidak ada basis
+    # diketahui, --base-rmse tidak perlu diisi. WAJIB diverifikasi ke test
     # sebelum lanjut stage lain.
     python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage0_optimizer_lr
 
     # Stage lanjutan (embedding_dim/dropout/epochs), pakai optimizer+lr
     # pemenang stage 0 sbg basis -- override manual via --base-optimizer/--base-lr
-    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage1_embedding_dim,stage2_dropout,stage3_epochs --base-optimizer adam --base-learning-rate 0.001
+    # DAN --base-rmse (val_fusion_rmse config itu dari checkpoint stage0).
+    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage1_embedding_dim,stage2_dropout,stage3_epochs --base-optimizer adam --base-learning-rate 0.001 --base-rmse 0.9803
 
-    # Stage AdamW: Adam lr=0,002 (stage0) near-miss di test (1,1309 vs
-    # default 1,1183) dgn diagnosis overfitting jelas (train MSE ~0,002,
-    # val RMSE berosilasi) -- tala epochs dulu (kemungkinan optimal <20),
-    # BARU lanjut weight_decay pakai epochs pemenang (fitur khas AdamW yg
-    # blm pernah diuji, weight_decay=0 == Adam polos scr matematis).
-    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_epochs --base-optimizer adamw --base-learning-rate 0.002 --cbf-pca-components 90
+    # Stage AdamW lanjutan (contoh, isi --base-rmse dgn angka checkpoint yg
+    # sesuai basis yg dipakai):
+    python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_epochs --base-optimizer adamw --base-learning-rate 0.002 --base-rmse 0.9803 --cbf-pca-components 90
     # setelah verifikasi test stage_adamw_epochs, lanjut (isi --base-epochs manual dgn pemenang):
     python scripts/tune_deepmf_oof_val.py --config configs/tripadvisor_hotel_config.yaml --stages stage_adamw_weight_decay --base-optimizer adamw --base-learning-rate 0.002 --base-epochs <pemenang> --cbf-pca-components 90
 """
@@ -257,6 +264,19 @@ def main() -> None:
         "--base-weight-decay", type=float, default=None,
         help="Override weight_decay basis.",
     )
+    parser.add_argument(
+        "--base-rmse", type=float, default=None,
+        help="val_fusion_rmse basis SAAT INI (mis. isi dgn val_fusion_rmse dari config "
+        "--base-optimizer/--base-learning-rate/dst di atas, kalau sudah pernah diukur di "
+        "stage/run sebelumnya) -- WAJIB diisi kalau melanjutkan dari stage lain (bukan "
+        "run pertama), lihat Temuan B4 audit metodologi (reports/methodology_audit_"
+        "2026-07-26.md): TANPA ini, script cuma bandingkan sesama kandidat BARU dlm satu "
+        "stage, TIDAK PERNAH cross-check ke baseline yg dibawa dari stage sebelumnya --"
+        "bisa 'memenangkan' kandidat yg sebenarnya LEBIH BURUK dari basis (persis yg "
+        "terjadi di stage_adamw_epochs: epochs=5 dilaporkan 'menang' padahal epochs=20 "
+        "basis msh lbh baik). Kalau kosong (run pertama, tidak py basis diketahui), stage "
+        "PERTAMA diterima apa adanya (tidak ada yg dibandingkan).",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -313,6 +333,7 @@ def main() -> None:
         current_best["epochs"] = args.base_epochs
     if args.base_weight_decay is not None:
         current_best["weight_decay"] = args.base_weight_decay
+    current_best_rmse = args.base_rmse  # None -> stage pertama, tidak ada basis diketahui
     n_items = len(all_items)
 
     stage_names = [s.strip() for s in args.stages.split(",") if s.strip()]
@@ -320,7 +341,11 @@ def main() -> None:
         if stage_name not in ALL_STAGES:
             raise ValueError(f"Stage '{stage_name}' tidak dikenal -- pilihan: {list(ALL_STAGES.keys())}")
         candidates = ALL_STAGES[stage_name]
-        logger.info("=== %s (%d kandidat) -- basis: %s ===", stage_name, len(candidates), current_best)
+        logger.info(
+            "=== %s (%d kandidat) -- basis: %s (val RMSE basis=%s) ===",
+            stage_name, len(candidates), current_best,
+            f"{current_best_rmse:.4f}" if current_best_rmse is not None else "BELUM DIKETAHUI",
+        )
         stage_results = []
         for override in candidates:
             params = dict(current_best)
@@ -344,13 +369,33 @@ def main() -> None:
             stage_results.append((override, rmse))
 
         best_override, best_rmse = min(stage_results, key=lambda t: t[1])
-        current_best.update(best_override)
-        logger.info("=== %s SELESAI: terbaik = %s (val RMSE=%.4f) ===", stage_name, best_override, best_rmse)
+
+        # FIX Temuan B4 (audit metodologi): bandingkan pemenang stage ini ke
+        # BASIS yg dibawa dari stage/run sebelumnya (current_best_rmse), BUKAN
+        # cuma sesama kandidat baru dlm stage ini. Kalau tdk ada kandidat baru
+        # yg lebih baik dari basis, current_best TIDAK berubah -- stage ini
+        # dianggap "tidak menemukan perbaikan", bukan diam-diam ganti ke
+        # kandidat yg sebenarnya lebih buruk.
+        if current_best_rmse is not None and best_rmse >= current_best_rmse:
+            logger.warning(
+                "=== %s SELESAI: TIDAK ADA kandidat baru yg mengalahkan basis "
+                "(terbaik stage ini %s val RMSE=%.4f, vs basis val RMSE=%.4f) -- "
+                "current_best TIDAK diubah, tetap %s ===",
+                stage_name, best_override, best_rmse, current_best_rmse, current_best,
+            )
+        else:
+            current_best.update(best_override)
+            current_best_rmse = best_rmse
+            logger.info("=== %s SELESAI: terbaik = %s (val RMSE=%.4f) ===", stage_name, best_override, best_rmse)
 
     logger.info("=" * 60)
     logger.info("STAGE(S) SELESAI -- config DeepMF terbaik SEJAUH INI:")
     for k, v in current_best.items():
         logger.info("  %s = %s", k, v)
+    logger.info(
+        "val_fusion_rmse basis: %s",
+        f"{current_best_rmse:.4f}" if current_best_rmse is not None else "BELUM DIKETAHUI",
+    )
     logger.info("CBF pca_components dipakai (ditala terpisah): %d", args.cbf_pca_components)
     logger.info("=" * 60)
     logger.info(

@@ -108,8 +108,16 @@ class InteractionDataset(Dataset):
 
         neg_labels = np.zeros(len(neg_users), dtype=np.float32)
 
-        self.users = np.concatenate([pos_users, np.array(neg_users)])
-        self.items = np.concatenate([pos_items, np.array(neg_items)])
+        # dtype=np.int64 EKSPLISIT (Temuan C1 audit metodologi): kalau
+        # negative_ratio=0 (dipakai di semua config saat ini, lihat
+        # docstring modul), neg_users/neg_items kosong -- np.array([]) TANPA
+        # dtype eksplisit default float64, memaksa np.concatenate() dgn
+        # pos_users/pos_items (int64) jadi float64 scr diam-diam. Tidak
+        # mengubah hasil (dikonversi balik ke torch.long di __getitem__),
+        # tapi memicu DeprecationWarning berulang & rapuh thd perubahan
+        # perilaku numpy/pytorch ke depan.
+        self.users = np.concatenate([pos_users, np.array(neg_users, dtype=np.int64)])
+        self.items = np.concatenate([pos_items, np.array(neg_items, dtype=np.int64)])
         self.labels = np.concatenate([pos_labels, neg_labels])
 
     def __len__(self) -> int:

@@ -222,6 +222,10 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
         val_df, user2idx, item2idx, len(all_items), negative_ratio=0, seed=exp_cfg["seed"]
     )
 
+    # Reseed EKSPLISIT tepat sebelum bobot DeepMF diinisialisasi (Temuan B1
+    # audit metodologi, reports/methodology_audit_2026-07-26.md) -- lihat
+    # komentar sama di run_baseline_absa.py utk alasan lengkap.
+    torch.manual_seed(exp_cfg["seed"])
     deepmf_trainer = DeepMFTrainer(len(all_users), len(all_items), deepmf_config)
     deepmf_trainer.fit(train_interactions, val_interactions)
 
@@ -258,6 +262,8 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
     # train_df sendiri = leakage in-sample klasik stacked model (lihat
     # docstring compute_oof_predictions). deepmf_trainer (model PENUH) tetap
     # dipakai apa adanya utk test_deepmf_preds -- itu genuinely out-of-sample.
+    # Reseed lagi (Temuan B1) -- compute_oof_predictions() TIDAK self-seed.
+    torch.manual_seed(exp_cfg["seed"])
     train_deepmf_preds = compute_oof_predictions(
         train_df, val_interactions, user2idx, item2idx, len(all_items),
         deepmf_config, rating_scale, seed=exp_cfg["seed"],

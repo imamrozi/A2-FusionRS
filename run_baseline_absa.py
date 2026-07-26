@@ -378,6 +378,15 @@ def run_pipeline(
         val_df, user2idx, item2idx, len(all_items), negative_ratio=0, seed=exp_cfg["seed"]
     )
 
+    # Reseed EKSPLISIT tepat sebelum bobot DeepMF diinisialisasi (Temuan B1
+    # audit metodologi, reports/methodology_audit_2026-07-26.md): SEBELUMNYA
+    # cuma ada SATU torch.manual_seed() di awal run_pipeline() -- preprocessing
+    # teks & skor ABSA di antaranya bisa mengonsumsi RNG global scr berbeda-beda
+    # tergantung cache hit/miss, jadi bobot AWAL DeepMF bisa berbeda antar run
+    # walau seed nominal SAMA. Reseed di sini menjamin inisialisasi bobot
+    # deterministik thd exp_cfg["seed"] saja, tidak tergantung riwayat RNG
+    # sebelumnya.
+    torch.manual_seed(exp_cfg["seed"])
     deepmf_trainer = DeepMFTrainer(len(all_users), len(all_items), deepmf_config)
     deepmf_trainer.fit(train_interactions, val_interactions)
 
@@ -415,6 +424,11 @@ def run_pipeline(
     # seluruh train_df, predict() langsung di situ = leakage in-sample.
     # deepmf_trainer (model PENUH) tetap dipakai apa adanya utk
     # test_deepmf_preds -- itu genuinely out-of-sample.
+    # Reseed lagi (Temuan B1) -- compute_oof_predictions() TIDAK self-seed
+    # (lihat docstring-nya), jadi tiap fold OOF-nya jg harus mulai dari state
+    # RNG yg deterministik thd seed, bukan meneruskan state sisa dari fit()
+    # model penuh di atas.
+    torch.manual_seed(exp_cfg["seed"])
     train_deepmf_preds = compute_oof_predictions(
         train_df, val_interactions, user2idx, item2idx, len(all_items),
         deepmf_config, rating_scale, seed=exp_cfg["seed"],
