@@ -1,35 +1,35 @@
 # configs/tripadvisor_hotel_config_absa_concat_confidence_tuned.yaml
-# Kandidat dari stage0_optimizer_lr (scripts/tune_deepmf_oof_val.py,
-# checkpoint tuning_deepmf_oof_val_search_v2.csv): optimizer=adam,
-# learning_rate=0,002 -- val_fusion_RMSE 0,9803, kurva lr jauh lebih mulus
-# dari SGD (tidak ada kolaps tajam spt lr=0,005 SGD).
+# Kandidat dari stage_adamw_epochs (scripts/tune_deepmf_oof_val.py,
+# checkpoint tuning_deepmf_oof_val_search_v2.csv): optimizer=adamw,
+# learning_rate=0,002 (dari stage0), epochs=5 (pemenang stage_adamw_epochs
+# dari kandidat 3/5/8/12 -- uji hipotesis overfitting: Adam/AdamW
+# konvergen jauh lebih cepat dari SGD, epochs=20 warisan era SGD kelewat
+# banyak). weight_decay=0,0 (belum diuji >0, itu stage_adamw_weight_decay
+# berikutnya).
 #
-# SUDAH DIVERIFIKASI ke test set (Temuan 16, memori sesi, --results-tag
-# tuned_adam): test RMSE 1,1309 vs default (SGD lr=0,001) 1,1183 --
-# NEAR-MISS (+1,1%, jauh lebih kecil dari selisih SGD lr=0,003 +16,8%
-# atau lr=0,005 +38,6%), BELUM mengalahkan default. Log training tunjukkan
-# overfitting jelas (train MSE turun ke 0,002, val RMSE berosilasi tdk
-# monoton) -- epochs=20 (diwarisi era tuning SGD) diduga kelewat banyak
-# utk Adam yg konvergen jauh lbh cepat. Investigasi lanjut: stage_adamw_
-# epochs & stage_adamw_weight_decay (fitur khas AdamW, weight_decay=0
-# membuatnya == Adam polos scr matematis, blm pernah diuji >0). File ini
-# BELUM final -- akan diupdate kalau ada kombinasi yg benar2 mengalahkan
-# default di test.
+# PENTING -- bug ditemukan & diperbaiki saat menyiapkan verifikasi file
+# ini: "epochs" TIDAK PERNAH dibaca dari YAML oleh run_baseline.py/
+# run_baseline_absa.py sebelumnya (dataclass default 20 dipakai diam-diam,
+# override YAML manapun utk epochs DIABAIKAN tanpa error). Diperbaiki di
+# kedua file itu SEBELUM verifikasi config ini dijalankan -- lihat commit
+# terkait. Pencarian tune_deepmf_oof_val.py sendiri TIDAK terdampak bug
+# ini (build DeepMFConfig langsung di Python, bukan lewat YAML).
 #
-# CATATAN: SGD lr=0,003 (val_fusion_RMSE 0,9317, tampak "lebih baik" dari
-# Adam di val) SENGAJA TIDAK dipakai lagi -- itu persis config yg SUDAH
-# terbukti GAGAL di test (Temuan 13 memori sesi: test RMSE 1,3065, lebih
-# buruk dari default 1,1183).
+# RIWAYAT: Adam lr=0,002/epochs=20 (SEBELUM fix bug ini, versi file ini
+# sebelumnya) sudah diverifikasi test RMSE 1,1309 vs default 1,1183
+# (near-miss +1,1%). Versi epochs=5 ini BELUM diverifikasi ke test --
+# itulah tujuan run berikutnya.
 #
 # CBF pca_components=90 (scripts/tune_deepmf_cbf_pilot.py --skip-deepmf,
-# val RMSE 0,9686 vs default 50 -> 1,0199) -- dipakai konsisten dgn saat
-# stage0_optimizer_lr dijalankan.
+# val RMSE 0,9686 vs default 50 -> 1,0199).
 
 _base: tripadvisor_hotel_config_absa_concat_confidence.yaml
 
 deepmf:
-  optimizer: adam
+  optimizer: adamw
   learning_rate: 0.002
+  epochs: 5
+  weight_decay: 0.0
 
 cbf_clustering:
   pca_components: 90

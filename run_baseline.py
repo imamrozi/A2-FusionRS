@@ -204,6 +204,10 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
         # lama yg sudah ada tetap berperilaku identik (non-breaking).
         optimizer=config["deepmf"].get("optimizer", "sgd"),
         weight_decay=config["deepmf"].get("weight_decay", 0.0),
+        # .get(..., 20): "epochs" SEBELUMNYA TIDAK PERNAH dibaca dari YAML
+        # sama sekali (dataclass default dipakai diam-diam) -- lihat
+        # run_baseline_absa.py utk detail temuannya.
+        epochs=config["deepmf"].get("epochs", 20),
     )
 
     train_interactions = InteractionDataset(

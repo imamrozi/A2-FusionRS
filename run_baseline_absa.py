@@ -357,6 +357,13 @@ def run_pipeline(
         negative_sampling_ratio=config["deepmf"]["negative_sampling_ratio"],
         optimizer=config["deepmf"].get("optimizer", "sgd"),
         weight_decay=config["deepmf"].get("weight_decay", 0.0),
+        # .get(..., 20): SEBELUMNYA field ini TIDAK PERNAH dibaca dari YAML
+        # sama sekali (dataclass default epochs=20 dipakai diam-diam,
+        # config YAML manapun yg coba override "epochs" DIABAIKAN tanpa
+        # error/warning) -- ditemukan saat verifikasi config tuned AdamW
+        # epochs=5 (stage_adamw_epochs). Default 20 dipertahankan sbg
+        # fallback (non-breaking utk config lama yg tak py key ini).
+        epochs=config["deepmf"].get("epochs", 20),
     )
 
     train_interactions = InteractionDataset(
