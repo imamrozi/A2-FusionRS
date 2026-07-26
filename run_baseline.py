@@ -42,6 +42,7 @@ from src.data_loader import get_loader_class
 from src.evaluation.metrics import (
     compute_rmse_mae,
     precision_recall_ndcg_at_k,
+    log_stream_diagnostics,
     sanity_check_rmse,
     save_predictions,
     save_results_yaml,
@@ -278,6 +279,13 @@ def run_pipeline(config: dict, cbf_include_sentiment: bool = False) -> None:
     test_deepmf_preds = deepmf_trainer.predict(test_df, user2idx, item2idx, rating_scale)
     test_cbf_preds = cbf_predictor.predict(test_df, rating_scale)
     test_sentiment_scores = test_df["sentiment_score"].values
+
+    # Diagnostik WAJIB (Temuan A3 audit metodologi,
+    # reports/methodology_audit_2026-07-26.md).
+    log_stream_diagnostics("train_deepmf_preds", train_deepmf_preds)
+    log_stream_diagnostics("train_cbf_preds", train_cbf_preds)
+    log_stream_diagnostics("test_deepmf_preds", test_deepmf_preds)
+    log_stream_diagnostics("test_cbf_preds", test_cbf_preds)
 
     fusion_config = FusionConfig(
         nmf_components=config["fusion_baseline"]["nmf_components"],

@@ -50,6 +50,7 @@ from src.config_utils import load_config
 from src.evaluation.metrics import (
     compute_rmse_mae,
     precision_recall_ndcg_at_k,
+    log_stream_diagnostics,
     sanity_check_rmse,
     save_predictions,
     save_results_yaml,
@@ -441,6 +442,14 @@ def run_pipeline(
     logger.info("Menghitung prediksi 3 stream pada test set...")
     test_deepmf_preds = deepmf_trainer.predict(test_df, user2idx, item2idx, rating_scale)
     test_cbf_preds = cbf_predictor.predict(test_df, rating_scale)
+
+    # Diagnostik WAJIB (Temuan A3 audit metodologi) -- lihat langsung
+    # distribusi tiap stream SEBELUM fusion, supaya kolaps (std~0) terdeteksi
+    # dini, bukan cuma kelihatan dari RMSE akhir yang tinggi.
+    log_stream_diagnostics("train_deepmf_preds", train_deepmf_preds)
+    log_stream_diagnostics("train_cbf_preds", train_cbf_preds)
+    log_stream_diagnostics("test_deepmf_preds", test_deepmf_preds)
+    log_stream_diagnostics("test_cbf_preds", test_cbf_preds)
 
     if absa_mode == "concat":
         # Vektor mentah k-kolom (bukan 1 skalar) -- NMFDecisionTreeFusion

@@ -250,6 +250,33 @@ def sanity_check_rmse(rmse: float, rating_scale: tuple[float, float] = (1.0, 5.0
         )
 
 
+def log_stream_diagnostics(name: str, preds: np.ndarray) -> None:
+    """Log statistik ringkas (min/max/mean/std/pct unik) satu stream prediksi
+    (deepmf_preds/cbf_preds/dst) SEBELUM masuk fusion -- diagnostik WAJIB
+    (bukan nice-to-have, Temuan A3 audit metodologi reports/
+    methodology_audit_2026-07-26.md): kolaps fusion ke prediktor konstan
+    (mis. RMSE 3,14 di seed 456 domain hotel, y_pred==1.0 utk SEMUA baris
+    test) tidak terlihat sama sekali dari log training DeepMF per-epoch yg
+    normal -- satu-satunya cara mendeteksi dini adalah lihat langsung
+    distribusi tiap stream tepat sebelum fusion.fit()/predict(). std=0 atau
+    hampir 0 adalah tanda paling jelas suatu stream sudah kolaps/tidak
+    informatif.
+    """
+    std = float(np.std(preds))
+    logger.info(
+        "[diagnostik stream] %s: min=%.4f max=%.4f mean=%.4f std=%.4f n_unique=%d/%d",
+        name, float(np.min(preds)), float(np.max(preds)), float(np.mean(preds)), std,
+        len(np.unique(preds)), len(preds),
+    )
+    if std < 1e-6:
+        logger.warning(
+            "[diagnostik stream] %s: std HAMPIR NOL (%.2e) -- stream ini kemungkinan "
+            "SUDAH KOLAPS ke nilai konstan, tidak membawa informasi apa pun ke fusion. "
+            "Ini sering jadi akar penyebab RMSE fusion yang tiba-tiba sangat tinggi.",
+            name, std,
+        )
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     # Contoh cepat sanity check
