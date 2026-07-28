@@ -92,14 +92,16 @@ def fig1_hybrid_vs_classical_cf() -> None:
 
 def fig2_rmse_main_result() -> None:
     variants = [
+        ("absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2", "No-sentiment\nfloor", C_GRAY),
         ("baseline_reimpl_cbf_nosentiment", "Baseline\n(global SA)", C_BLUE),
         ("absa_ablation_cbf_nosentiment", "ABSA\nmean", C_RED),
         ("absa_ablation_confidence_mean_cbf_nosentiment", "ABSA\nconf-mean", C_ORANGE),
         ("absa_ablation_concat_cbf_nosentiment", "ABSA\nconcat", C_PURPLE),
         ("absa_ablation_concat_confidence_cbf_nosentiment", "ABSA\nconcat+conf", C_GREEN),
     ]
+    baseline_offset = 1  # index of "Baseline" in variants -- best-variant search starts after it
 
-    fig, axes = plt.subplots(1, 3, figsize=(11, 4.2), dpi=200, sharey=False)
+    fig, axes = plt.subplots(1, 3, figsize=(11.5, 4.2), dpi=200, sharey=False)
     for ax, domain in zip(axes, DOMAINS):
         means, stds = [], []
         for prefix, _, _ in variants:
@@ -110,12 +112,15 @@ def fig2_rmse_main_result() -> None:
         colors = [c for _, _, c in variants]
         bars = ax.bar(x, means, yerr=stds, capsize=3, color=colors, edgecolor="white", linewidth=0.5)
         # highlight the best (lowest-mean) bar with a black outline, if it beats baseline
-        best_idx = int(np.argmin(means[1:])) + 1
-        if means[best_idx] < means[0]:
+        best_idx = int(np.argmin(means[baseline_offset + 1:])) + baseline_offset + 1
+        if means[best_idx] < means[baseline_offset]:
             bars[best_idx].set_edgecolor("black")
             bars[best_idx].set_linewidth(1.6)
         ax.set_xticks(x)
-        ax.set_xticklabels([lbl for _, lbl, _ in variants], fontsize=7.5)
+        ax.set_xticklabels(
+            [lbl.replace("\n", " ") for _, lbl, _ in variants],
+            fontsize=7.5, rotation=25, ha="right",
+        )
         ax.set_title(DOMAIN_LABELS[domain], fontsize=10)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
@@ -123,8 +128,8 @@ def fig2_rmse_main_result() -> None:
         ax.set_axisbelow(True)
     axes[0].set_ylabel("RMSE (lower is better)")
     fig.suptitle(
-        "RMSE of the adapted hybrid baseline vs. four ABSA sentiment-fusion variants\n"
-        "(mean ± SD over 5 seeds; black outline = best variant per domain, where it beats baseline)",
+        "RMSE of the adapted hybrid baseline vs. four ABSA sentiment-fusion variants, plus a\n"
+        "no-sentiment floor (mean ± SD over 5 seeds; black outline = best variant, where it beats baseline)",
         fontsize=9.5,
     )
     fig.tight_layout(rect=[0, 0, 1, 0.90])

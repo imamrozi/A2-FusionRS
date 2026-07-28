@@ -1,0 +1,4 @@
+domain,domain_label,n_reviews,pct_with_any_aspect_match,aspect_match_pct_detail
+restaurant,Restaurant,118695,87.65,"{'ambiance': 0.2556384009435949, 'food': 0.7242680820590589, 'price': 0.31674459749778844, 'service': 0.4766586629596866}"
+amazon_electronics,E-commerce,122062,45.09,"{'customer_service': 0.0837770968851895, 'ease_of_use': 0.11186937785715456, 'price_value': 0.23020268388196163, 'quality_durability': 0.15250446494404482, 'shipping_packaging': 0.0824826727400829}"
+tripadvisor_hotel,Hotel,79562,95.88,"{'cleanliness': 0.4011211382318192, 'location': 0.5846509640280536, 'rooms': 0.8915059953244011, 'service': 0.6849123953646213, 'sleep_quality': 0.34639652095221335, 'value': 0.38118699881853146}"

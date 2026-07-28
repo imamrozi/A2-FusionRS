@@ -1,0 +1,136 @@
+domain,domain_label,model_prefix,model_label,seed,rmse,mae,n_test_samples,is_floor,floor_status
+restaurant,Restaurant,baseline_reimpl_cbf_nosentiment,Baseline (global SA),42,0.7150989643600204,0.5707388235338645,13233,False,
+restaurant,Restaurant,baseline_reimpl_cbf_nosentiment,Baseline (global SA),123,0.6938433166061284,0.5576614942616676,13233,False,
+restaurant,Restaurant,baseline_reimpl_cbf_nosentiment,Baseline (global SA),456,0.6865701902411245,0.5583071976885144,13233,False,
+restaurant,Restaurant,baseline_reimpl_cbf_nosentiment,Baseline (global SA),789,0.7537964962458906,0.591570884599823,13233,False,
+restaurant,Restaurant,baseline_reimpl_cbf_nosentiment,Baseline (global SA),1011,0.6807808471838153,0.5548420882409955,13233,False,
+restaurant,Restaurant,absa_ablation_cbf_nosentiment,ABSA mean,42,0.8625809773284956,0.6756298358933843,13233,False,
+restaurant,Restaurant,absa_ablation_cbf_nosentiment,ABSA mean,123,0.8885844308648625,0.6858158368354755,13233,False,
+restaurant,Restaurant,absa_ablation_cbf_nosentiment,ABSA mean,456,0.8358753999387946,0.6564502908726257,13233,False,
+restaurant,Restaurant,absa_ablation_cbf_nosentiment,ABSA mean,789,0.8467107253102681,0.6597136439231811,13233,False,
+restaurant,Restaurant,absa_ablation_cbf_nosentiment,ABSA mean,1011,0.8406477900931381,0.6619797460155301,13233,False,
+restaurant,Restaurant,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,42,0.8402203243684155,0.6582059924176116,13233,False,
+restaurant,Restaurant,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,123,0.8847816892392874,0.6882856561794239,13233,False,
+restaurant,Restaurant,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,456,0.8177093829863761,0.6481086972816531,13233,False,
+restaurant,Restaurant,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,789,0.8466596349380506,0.6573673566403722,13233,False,
+restaurant,Restaurant,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,1011,0.8645853827387476,0.6718307051225941,13233,False,
+restaurant,Restaurant,absa_ablation_concat_cbf_nosentiment,ABSA concat,42,0.7317980674120781,0.5779502195683021,13233,False,
+restaurant,Restaurant,absa_ablation_concat_cbf_nosentiment,ABSA concat,123,0.7012334079107445,0.5561103804619448,13233,False,
+restaurant,Restaurant,absa_ablation_concat_cbf_nosentiment,ABSA concat,456,0.7038937476834881,0.5711969724229791,13233,False,
+restaurant,Restaurant,absa_ablation_concat_cbf_nosentiment,ABSA concat,789,0.7745126479101826,0.6167654411755377,13233,False,
+restaurant,Restaurant,absa_ablation_concat_cbf_nosentiment,ABSA concat,1011,0.7405937261174775,0.5877441000726492,13233,False,
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,42,0.6826492154198969,0.5543031991317477,13233,False,
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,123,0.6821828980371224,0.553228446741604,13233,False,
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,456,0.6825235162864347,0.5524816262946132,13233,False,
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,789,0.6845335197880391,0.5544986870065325,13233,False,
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,1011,0.6788435668728457,0.5502284101377202,13233,False,
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",42,1.5949464767321457,1.1991094905272277,13233,True,buggy_constant_column_nmf
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",123,1.5015645308865502,1.150354254627016,13233,True,buggy_constant_column_nmf
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",456,1.2631411771960859,0.9707316423073157,13233,True,buggy_constant_column_nmf
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",789,1.8142381599211164,1.3937278252346843,13233,True,buggy_constant_column_nmf
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",1011,1.6240632375312625,1.234905060777893,13233,True,buggy_constant_column_nmf
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),42,1.4727386688993995,1.1001360982284814,13233,True,fixed_dropped_column
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),123,1.3010294955943553,0.9900147415420829,13233,True,fixed_dropped_column
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),456,1.1715934361364775,0.9040367961005077,13233,True,fixed_dropped_column
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),789,1.2251845551224791,0.9167296294214017,13233,True,fixed_dropped_column
+restaurant,Restaurant,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),1011,1.1889616136223462,0.9144593210976061,13233,True,fixed_dropped_column
+restaurant,Restaurant,classical_cf_item_knn,Item-KNN,42,1.2019091454970638,0.9237018943436516,13233,False,
+restaurant,Restaurant,classical_cf_item_knn,Item-KNN,123,1.2019091454970638,0.9237018943436516,13233,False,
+restaurant,Restaurant,classical_cf_item_knn,Item-KNN,456,1.2019091454970638,0.9237018943436516,13233,False,
+restaurant,Restaurant,classical_cf_item_knn,Item-KNN,789,1.2019091454970638,0.9237018943436516,13233,False,
+restaurant,Restaurant,classical_cf_item_knn,Item-KNN,1011,1.2019091454970638,0.9237018943436516,13233,False,
+restaurant,Restaurant,classical_cf_svd,SVD,42,1.0757076218914174,0.8455853397448228,13233,False,
+restaurant,Restaurant,classical_cf_svd,SVD,123,1.074592239802091,0.8444737729090804,13233,False,
+restaurant,Restaurant,classical_cf_svd,SVD,456,1.0747708072515059,0.8452756533157544,13233,False,
+restaurant,Restaurant,classical_cf_svd,SVD,789,1.0759326278664039,0.8467743105965119,13233,False,
+restaurant,Restaurant,classical_cf_svd,SVD,1011,1.0753408876329051,0.8448746769208266,13233,False,
+amazon_electronics,E-commerce,baseline_reimpl_cbf_nosentiment,Baseline (global SA),42,0.6776393827825312,0.44650658356779066,16580,False,
+amazon_electronics,E-commerce,baseline_reimpl_cbf_nosentiment,Baseline (global SA),123,0.6890715793991044,0.41598814534318024,16580,False,
+amazon_electronics,E-commerce,baseline_reimpl_cbf_nosentiment,Baseline (global SA),456,0.6516534624166116,0.42500526318234827,16580,False,
+amazon_electronics,E-commerce,baseline_reimpl_cbf_nosentiment,Baseline (global SA),789,0.6852916179495422,0.4762892008397029,16580,False,
+amazon_electronics,E-commerce,baseline_reimpl_cbf_nosentiment,Baseline (global SA),1011,0.8952197154699559,0.7221183321935574,16580,False,
+amazon_electronics,E-commerce,absa_ablation_cbf_nosentiment,ABSA mean,42,0.8102748133536238,0.5344465515652832,16580,False,
+amazon_electronics,E-commerce,absa_ablation_cbf_nosentiment,ABSA mean,123,0.855801352629724,0.5114752989631471,16580,False,
+amazon_electronics,E-commerce,absa_ablation_cbf_nosentiment,ABSA mean,456,0.7971869176584024,0.507575088333497,16580,False,
+amazon_electronics,E-commerce,absa_ablation_cbf_nosentiment,ABSA mean,789,0.836187363140847,0.5679260390894162,16580,False,
+amazon_electronics,E-commerce,absa_ablation_cbf_nosentiment,ABSA mean,1011,1.046637898731516,0.8290514524007706,16580,False,
+amazon_electronics,E-commerce,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,42,0.8206021492605537,0.5363178392155262,16580,False,
+amazon_electronics,E-commerce,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,123,0.9095067309159349,0.5244476698738284,16580,False,
+amazon_electronics,E-commerce,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,456,0.7908755075731494,0.5057820056616973,16580,False,
+amazon_electronics,E-commerce,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,789,0.8290266987500449,0.5637397220800654,16580,False,
+amazon_electronics,E-commerce,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,1011,1.0415324841020779,0.8247986378891596,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_cbf_nosentiment,ABSA concat,42,0.6685497801793436,0.4470237555707816,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_cbf_nosentiment,ABSA concat,123,0.6868479917097683,0.4121818142483877,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_cbf_nosentiment,ABSA concat,456,0.6539833536803952,0.424943495244215,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_cbf_nosentiment,ABSA concat,789,0.6921513069416456,0.4795333713097784,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_cbf_nosentiment,ABSA concat,1011,0.8911235380012311,0.7213216651681844,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,42,0.6665254784363258,0.44557652478464815,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,123,0.6729381666871649,0.40799075883563674,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,456,0.6523301816619442,0.424718467108118,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,789,0.682806184606128,0.4727791872446599,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,1011,0.8960569957625873,0.721430644904048,16580,False,
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",42,1.3111043535747064,0.9255342946594315,16580,True,buggy_constant_column_nmf
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",123,1.296179844190908,0.8162721337487076,16580,True,buggy_constant_column_nmf
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",456,1.251726756667146,0.8662622858310101,16580,True,buggy_constant_column_nmf
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",789,1.3426365852628201,0.981175058558892,16580,True,buggy_constant_column_nmf
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",1011,1.7693403021743952,1.4683628618878681,16580,True,buggy_constant_column_nmf
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),42,1.3193281021933017,0.9109011330947675,16580,True,fixed_dropped_column
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),123,1.284526063685424,0.8378607322697694,16580,True,fixed_dropped_column
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),456,1.249779234870925,0.854667703090537,16580,True,fixed_dropped_column
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),789,1.2724278251834165,0.9180771218550404,16580,True,fixed_dropped_column
+amazon_electronics,E-commerce,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),1011,1.384800875504741,1.0514140712953002,16580,True,fixed_dropped_column
+amazon_electronics,E-commerce,classical_cf_item_knn,Item-KNN,42,1.2240158125010432,0.8311161572668607,16580,False,
+amazon_electronics,E-commerce,classical_cf_item_knn,Item-KNN,123,1.2240158125010432,0.8311161572668607,16580,False,
+amazon_electronics,E-commerce,classical_cf_item_knn,Item-KNN,456,1.2240158125010432,0.8311161572668607,16580,False,
+amazon_electronics,E-commerce,classical_cf_item_knn,Item-KNN,789,1.2240158125010432,0.8311161572668607,16580,False,
+amazon_electronics,E-commerce,classical_cf_item_knn,Item-KNN,1011,1.2240158125010432,0.8311161572668607,16580,False,
+amazon_electronics,E-commerce,classical_cf_svd,SVD,42,1.1407140438906496,0.8022286117004974,16580,False,
+amazon_electronics,E-commerce,classical_cf_svd,SVD,123,1.141979970988657,0.8025863368922465,16580,False,
+amazon_electronics,E-commerce,classical_cf_svd,SVD,456,1.142540455566741,0.8034922226059135,16580,False,
+amazon_electronics,E-commerce,classical_cf_svd,SVD,789,1.1426632799214191,0.8031603135015766,16580,False,
+amazon_electronics,E-commerce,classical_cf_svd,SVD,1011,1.1420340809730354,0.8033178182361497,16580,False,
+tripadvisor_hotel,Hotel,baseline_reimpl_cbf_nosentiment,Baseline (global SA),42,0.6138045194834114,0.5054718629275567,11795,False,
+tripadvisor_hotel,Hotel,baseline_reimpl_cbf_nosentiment,Baseline (global SA),123,0.625290196386123,0.5133742965867067,11795,False,
+tripadvisor_hotel,Hotel,baseline_reimpl_cbf_nosentiment,Baseline (global SA),456,0.6199506675718527,0.5114932759643142,11795,False,
+tripadvisor_hotel,Hotel,baseline_reimpl_cbf_nosentiment,Baseline (global SA),789,0.6448781199758452,0.5257260435726911,11795,False,
+tripadvisor_hotel,Hotel,baseline_reimpl_cbf_nosentiment,Baseline (global SA),1011,0.6240506279483585,0.5110544811621431,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_cbf_nosentiment,ABSA mean,42,0.7135437138800914,0.5785513009721562,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_cbf_nosentiment,ABSA mean,123,0.7190776754245465,0.5836708198556245,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_cbf_nosentiment,ABSA mean,456,0.716267681131972,0.5794820715836894,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_cbf_nosentiment,ABSA mean,789,0.730106486167881,0.5899156947610777,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_cbf_nosentiment,ABSA mean,1011,0.7161067608737223,0.5800139697437661,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,42,0.7117610329349435,0.5734585276970849,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,123,0.709030322261945,0.5740764700665972,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,456,0.7149870064961665,0.5771642770060186,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,789,0.7161472400274888,0.5782939737170355,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_confidence_mean_cbf_nosentiment,ABSA confidence-mean,1011,0.7283072250181993,0.5823089784993204,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_cbf_nosentiment,ABSA concat,42,0.6335573392659709,0.5146330229909116,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_cbf_nosentiment,ABSA concat,123,0.6287438193042929,0.5132206751857373,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_cbf_nosentiment,ABSA concat,456,0.6338252613757897,0.5150316538130679,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_cbf_nosentiment,ABSA concat,789,0.6350543832579658,0.515708575845842,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_cbf_nosentiment,ABSA concat,1011,0.6300335939077235,0.5161118552755714,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,42,0.6273943547492232,0.5110364095615787,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,123,0.6254316015518938,0.5103048002698448,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,456,0.628477258870388,0.5114570183549659,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,789,0.6301745100113078,0.5140109091955694,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment,ABSA concat+confidence,1011,0.6278307018975587,0.510782447568956,11795,False,
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",42,1.4274900527794336,1.0662992793556592,11795,True,buggy_constant_column_nmf
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",123,1.5277427161950194,1.3455470345678053,11795,True,buggy_constant_column_nmf
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",456,3.1418627275706745,3.006189063162357,11795,True,buggy_constant_column_nmf
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",789,1.40152188063813,1.1857944762032804,11795,True,buggy_constant_column_nmf
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment,"No-sentiment floor (BUGGY, do not use)",1011,3.1418627275706745,3.006189063162357,11795,True,buggy_constant_column_nmf
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),42,0.9242497576017582,0.7037009726335379,11795,True,fixed_dropped_column
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),123,0.9483525661799946,0.725345816075444,11795,True,fixed_dropped_column
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),456,0.9617822873466784,0.7292608000114784,11795,True,fixed_dropped_column
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),789,0.9613287467362787,0.7325389003156174,11795,True,fixed_dropped_column
+tripadvisor_hotel,Hotel,absa_ablation_concat_confidence_cbf_nosentiment_no_sentiment_fixed_v2,No-sentiment floor (fixed),1011,0.9418091100325936,0.710712922080054,11795,True,fixed_dropped_column
+tripadvisor_hotel,Hotel,classical_cf_item_knn,Item-KNN,42,0.9163437483448726,0.6917113553371,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_item_knn,Item-KNN,123,0.9163437483448726,0.6917113553371,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_item_knn,Item-KNN,456,0.9163437483448726,0.6917113553371,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_item_knn,Item-KNN,789,0.9163437483448726,0.6917113553371,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_item_knn,Item-KNN,1011,0.9163437483448726,0.6917113553371,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_svd,SVD,42,0.8951387774114238,0.6953004074177533,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_svd,SVD,123,0.8950765024541837,0.6952776710377653,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_svd,SVD,456,0.8953489442845948,0.6954998644593915,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_svd,SVD,789,0.8954532656906491,0.6955767235143451,11795,False,
+tripadvisor_hotel,Hotel,classical_cf_svd,SVD,1011,0.8952875459739378,0.6954933949373899,11795,False,

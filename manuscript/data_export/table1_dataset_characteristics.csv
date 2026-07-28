@@ -1,0 +1,4 @@
+domain,domain_label,reviews,users,items,sparsity_pct,mean_rating,test_size
+restaurant,Restaurant (Yelp),118695,7152,3757,99.56,3.76,13233
+amazon_electronics,E-commerce (Amazon Electronics),122068,14750,9226,99.91,4.37,16580
+tripadvisor_hotel,Hotel (TripAdvisor),79562,11236,2056,99.66,3.94,11795
