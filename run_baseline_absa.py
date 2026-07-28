@@ -488,20 +488,29 @@ def run_pipeline(
     elif sentiment_protocol == "no_sentiment_ablation":
         # Ablasi murni: HAPUS stream sentimen sepenuhnya dari fusion (BUKAN
         # substitusi P2/P3) -- mengukur akurasi hybrid DeepMF+CBF SENDIRIAN,
-        # tanpa sinyal sentimen sama sekali. Kolom KONSTAN (bukan menghapus
-        # argumen sentiment_scores dari fusion_model.fit/predict, yg
-        # mewajibkan 3 argumen) -- kolom konstan = TIDAK ADA variance =
-        # TIDAK ADA informasi yg bisa dipelajari DecisionTree dari kolom
-        # itu, jadi SECARA EFEKTIF setara "no sentiment" tanpa mengubah
-        # fusion_nmf_dt.py (additive, non-invasive, ZERO risiko regresi ke
-        # fusion 3-stream yg sudah divalidasi).
+        # tanpa sinyal sentimen sama sekali.
+        #
+        # RIWAYAT BUG (2026-07-28, scripts/diagnose_no_sentiment_floor.py):
+        # versi awal memakai kolom KONSTAN (nol) alih-alih None, dgn asumsi
+        # "kolom tanpa variance = tidak ada info yg bisa dipelajari
+        # DecisionTree, jadi efeknya sama dgn tanpa sentimen". Asumsi itu
+        # SALAH utk NMF: kolom konstan membuat matriks fitur rank-deficient
+        # (1 dari 3 kolom nol variance) sementara n_components tetap
+        # dipaksa 3 -- NMF/DT jatuh ke solusi degenerate & TIDAK STABIL
+        # antar-seed (RMSE hotel: 1.4/1.5/3.1/1.4/3.1 -- dua seed BERBEDA
+        # menghasilkan RMSE IDENTIK PERSIS, indikasi kuat degenerasi bukan
+        # variasi stokastik wajar). Diganti None: kolom sentimen dihapus
+        # SEPENUHNYA dari feature matrix SEBELUM NMF (lihat
+        # NMFDecisionTreeFusion._build_feature_matrix), n_components ikut
+        # turun otomatis dari 3 ke 2 via cap yg sudah ada di fit().
         logger.info(
             "=== Protokol sentimen 'no_sentiment_ablation': stream sentimen "
-            "DIHAPUS dari fusion (kolom konstan, nol informasi) -- mengukur "
-            "akurasi hybrid DeepMF+CBF SENDIRIAN ==="
+            "DIHAPUS sepenuhnya dari fusion (bukan kolom konstan -- lihat "
+            "catatan bug di atas) -- mengukur akurasi hybrid DeepMF+CBF "
+            "SENDIRIAN ==="
         )
-        train_sentiment_scores = np.zeros(len(train_df), dtype=np.float32)
-        test_sentiment_scores = np.zeros(len(test_df), dtype=np.float32)
+        train_sentiment_scores = None
+        test_sentiment_scores = None
     else:
         train_sentiment_scores = train_df[feature_cols].values
         test_sentiment_scores = test_df[feature_cols].values

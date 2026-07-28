@@ -72,23 +72,34 @@ class NMFDecisionTreeFusion:
 
     def _build_feature_matrix(
         self,
-        sentiment_scores: np.ndarray,
+        sentiment_scores: np.ndarray | None,
         deepmf_preds: np.ndarray,
         cbf_preds: np.ndarray,
     ) -> np.ndarray:
         # sentiment_scores boleh 1D (n,) -- 1 skor/baris -- atau 2D (n,k) --
-        # k skor terpisah/baris (mis. per-aspek ABSA tanpa agregasi).
+        # k skor terpisah/baris (mis. per-aspek ABSA tanpa agregasi) -- ATAU
+        # None, utk ablasi "tanpa sentimen sama sekali" (lihat diagnose_
+        # no_sentiment_floor.py): kolom sentimen KONSTAN (bukan None) pernah
+        # dipakai di sini, tapi terbukti membuat NMF menerima matriks rank-
+        # deficient (1 dari 3 kolom tanpa variance) dgn n_components tetap
+        # dipaksa 3 -- hasil RMSE 2-3x lebih buruk & TIDAK STABIL antar-seed
+        # (dua seed berbeda bisa hasilkan RMSE identik persis, indikasi NMF/
+        # DT jatuh ke solusi degenerate). None menghapus kolom itu
+        # sepenuhnya SEBELUM NMF, sehingga n_components ikut turun otomatis
+        # via cap `min(nmf_components, ..., features.shape[1])` di fit().
+        deepmf_2d = deepmf_preds.reshape(-1, 1)
+        cbf_2d = cbf_preds.reshape(-1, 1)
+        if sentiment_scores is None:
+            return np.concatenate([deepmf_2d, cbf_2d], axis=1)
         sentiment_2d = (
             sentiment_scores.reshape(-1, 1) if sentiment_scores.ndim == 1 else sentiment_scores
         )
-        deepmf_2d = deepmf_preds.reshape(-1, 1)
-        cbf_2d = cbf_preds.reshape(-1, 1)
         features = np.concatenate([sentiment_2d, deepmf_2d, cbf_2d], axis=1)
         return features
 
     def fit(
         self,
-        sentiment_scores: np.ndarray,
+        sentiment_scores: np.ndarray | None,
         deepmf_preds: np.ndarray,
         cbf_preds: np.ndarray,
         y_true_ratings: np.ndarray,
@@ -134,7 +145,7 @@ class NMFDecisionTreeFusion:
 
     def predict(
         self,
-        sentiment_scores: np.ndarray,
+        sentiment_scores: np.ndarray | None,
         deepmf_preds: np.ndarray,
         cbf_preds: np.ndarray,
     ) -> np.ndarray:
