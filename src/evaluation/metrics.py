@@ -10,6 +10,7 @@ perbedaan implementasi metrik antar model yang jadi confounding factor.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +21,38 @@ from scipy import stats
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 logger = logging.getLogger(__name__)
+
+
+def _to_native(obj):
+    """Cast rekursif numpy scalar (int64/float64/bool_/dst) -> tipe Python
+    native, supaya `yaml.safe_dump` tidak pernah gagal karena tipe numpy yang
+    lolos tanpa cast eksplisit di suatu caller (Invarian #9: kebijakan
+    fallback/serialisasi harus eksplisit, bukan berharap tiap pemanggil ingat
+    men-cast manual). Tidak mengubah NILAI, hanya tipe -- aman dipanggil pada
+    struktur yang sudah 100% native (no-op).
+
+    Insiden yang memotivasi ini: `protocol_p3_darraz_reimpl_..._seed42.yaml`
+    (Fase 1 Step 4 smoke test) keluar 0 byte -- `yaml.safe_dump` membuka file
+    (langsung truncate ke 0 byte) LALU baru gagal serialisasi di tengah jalan,
+    meninggalkan file kosong tanpa jejak error yang tersimpan. Root cause pasti
+    tidak terlacak (tidak ada log run tersimpan -- gap terpisah, lihat
+    `run_protocol_p2_p3.py`), jadi perbaikan di sini defense-in-depth: bukan
+    cuma menutup satu titik kebocoran tipe yang ditemukan, tapi seluruh kelas
+    bug ini, utk SEMUA pemanggil `save_results_yaml` (P1 lama & P2/P3 baru).
+    """
+    if isinstance(obj, dict):
+        return {_to_native(k): _to_native(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_native(v) for v in obj]
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return _to_native(obj.tolist())
+    return obj
 
 
 @dataclass
@@ -164,9 +197,21 @@ def save_results_yaml(path: str | Path, results_summary: dict, config: dict | No
     if config is not None:
         results_summary = {**results_summary, "config_snapshot": config}
 
+    # Cast numpy -> native SEBELUM dump (Invarian #9) -- lihat docstring
+    # `_to_native` utk insiden yang memotivasi ini.
+    native_summary = _to_native(results_summary)
+
+    # Tulis ke file sementara lalu rename atomik -- kalau yaml.safe_dump
+    # gagal di tengah jalan (tipe tak terduga lolos dari _to_native, disk
+    # penuh, dst.), path ASLI tidak pernah tersentuh (bukan ditimpa jadi
+    # file 0 byte) -- exception tetap naik ke pemanggil, TIDAK ditelan diam-
+    # diam, supaya kegagalan run tetap terlihat, bukan cuma file kosong yang
+    # baru ketahuan belakangan.
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
-        yaml.safe_dump(results_summary, f, allow_unicode=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w") as f:
+        yaml.safe_dump(native_summary, f, allow_unicode=True)
+    os.replace(tmp_path, path)
     logger.info("Hasil evaluasi disimpan ke %s", path)
 
 
