@@ -1,0 +1,16 @@
+# configs/amazon_electronics_config_agf_colab.yaml
+# Versi Colab dari amazon_electronics_config_agf.yaml -- path Google Drive
+# (lewat _base), hyperparameter agf: SAMA dengan versi lokal.
+
+_base: amazon_electronics_config_colab.yaml
+
+experiment:
+  name: "amazon_electronics_agf_colab"
+
+agf:
+  d: 64
+  n_heads: 2
+  epochs: 30
+  batch_size: 512
+  learning_rate: 0.001
+  absa_source: "pyabsa"

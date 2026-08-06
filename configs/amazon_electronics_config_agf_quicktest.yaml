@@ -1,0 +1,18 @@
+# configs/amazon_electronics_config_agf_quicktest.yaml
+# Smoke test end-to-end AGF pada subset kecil -- verifikasi tahap 1-8
+# run_attention_gated_fusion.py berjalan tanpa error, BUKAN angka RMSE
+# yang dilaporkan di manuskrip. Hyperparameter agf: dikecilkan (epochs=3,
+# d=16) supaya training modul fusi cepat pada smoke test.
+
+_base: amazon_electronics_config_quicktest.yaml
+
+experiment:
+  name: "amazon_electronics_agf_quicktest_smoke_run"
+
+agf:
+  d: 16
+  n_heads: 2
+  epochs: 3
+  batch_size: 64
+  learning_rate: 0.001
+  absa_source: "pyabsa"

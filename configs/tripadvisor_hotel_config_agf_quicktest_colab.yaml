@@ -1,0 +1,17 @@
+# configs/tripadvisor_hotel_config_agf_quicktest_colab.yaml
+# Versi Colab dari tripadvisor_hotel_config_agf_quicktest.yaml -- path
+# Google Drive (lewat _base), hyperparameter agf: SAMA dengan versi lokal
+# quicktest.
+
+_base: tripadvisor_hotel_config_quicktest_colab.yaml
+
+experiment:
+  name: "tripadvisor_hotel_agf_quicktest_colab_smoke_run"
+
+agf:
+  d: 16
+  n_heads: 2
+  epochs: 3
+  batch_size: 64
+  learning_rate: 0.001
+  absa_source: "pyabsa"

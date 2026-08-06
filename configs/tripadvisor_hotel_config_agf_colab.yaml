@@ -1,0 +1,16 @@
+# configs/tripadvisor_hotel_config_agf_colab.yaml
+# Versi Colab dari tripadvisor_hotel_config_agf.yaml -- path Google Drive
+# (lewat _base), hyperparameter agf: SAMA dengan versi lokal.
+
+_base: tripadvisor_hotel_config_colab.yaml
+
+experiment:
+  name: "tripadvisor_hotel_agf_colab"
+
+agf:
+  d: 64
+  n_heads: 2
+  epochs: 30
+  batch_size: 512
+  learning_rate: 0.001
+  absa_source: "pyabsa"
