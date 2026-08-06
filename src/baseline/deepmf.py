@@ -45,9 +45,20 @@ class DeepMFConfig:
     hidden_layers: tuple[int, ...] = (256, 128, 64, 32)
     dropout: float = 0.3
     batch_size: int = 512
+    # KOREKSI 2026-08-06: lr=0.001 (nilai lama, di bawah) BUKAN "sesuai
+    # Table 10 baseline paper" seperti tertulis sebelumnya di sini --
+    # dicek ulang langsung terhadap PDF Darraz et al. (paper-baseline/),
+    # Table 10 (DeepMF hyperparameter configuration) sebenarnya melaporkan
+    # learning rate = 0.002, bukan 0.001 (num_folds=8, epochs=20,
+    # batch_size=50 -- juga TIDAK sama dgn project ini yg pakai OOF 5-fold
+    # & batch_size=512, deviasi terpisah, sudah didokumentasikan). lr=0.001
+    # sebelumnya berasal dari draf proposal awal proyek (lihat docstring
+    # modul di atas), BUKAN dari paper Darraz -- kekeliruan atribusi lama,
+    # bukan kekeliruan angka: 0.001 tetap nilai yg diuji & terbukti kolaps.
+    #
     # PERUBAHAN DEFAULT 2026-07-26 (Temuan A3/23, reports/methodology_audit_
-    # 2026-07-26.md): SGD polos (lr=0.001, default LAMA sesuai Table 10
-    # baseline paper) TERBUKTI KOLAPS TOTAL ke prediktor nyaris-konstan di
+    # 2026-07-26.md): SGD polos (lr=0.001, default LAMA proyek ini) TERBUKTI
+    # KOLAPS TOTAL ke prediktor nyaris-konstan di
     # 5/5 seed protokol proyek (42/123/456/789/1011), domain hotel -- BUKAN
     # cuma test set, prediksi di TRAIN SAMPLE juga kolaps (std=0,0000).
     # Diduga vanishing gradient ke embedding (init std=0.01 x element-wise
@@ -57,7 +68,11 @@ class DeepMFConfig:
     # 0,0021-0,0032, 76-84% baris prediksi unik vs 0,4-0,5% sblmnya,
     # test_mean ~3,90 mendekati rata-rata rating asli ~3,94). AdamW
     # lr=0.001 (lr lama+optimizer baru saja): MASIH 1/5 kolaps (seed 42) --
-    # lr HARUS ikut naik, ganti optimizer saja tidak cukup.
+    # lr HARUS ikut naik, ganti optimizer saja tidak cukup. CATATAN: default
+    # 0.002 di bawah ini KEBETULAN numerically sama dgn Table 10 Darraz et
+    # al. (lihat koreksi di atas) -- optimizer AdamW tetap deviasi disengaja
+    # (Darraz tidak menyebutkan optimizer utk DeepMF sama sekali di Table
+    # 10, hanya num_folds/epochs/batch_size/lr), bukan replikasi paper.
     learning_rate: float = 0.002
     epochs: int = 20
     negative_sampling_ratio: int = 4
@@ -330,6 +345,87 @@ class DeepMFTrainer:
         self.model.train()
         return preds
 
+    @torch.no_grad()
+    def predict_with_latent(
+        self,
+        df: pd.DataFrame,
+        user2idx: dict,
+        item2idx: dict,
+        rating_scale: tuple[float, float] = (1.0, 5.0),
+        unseen_fallback: str = "global_mean",
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sama persis dengan predict(), TAPI juga mengembalikan representasi
+        laten (hidden layer terakhir deep_layers, SEBELUM output_layer) per
+        baris -- dibutuhkan Attention-Gated Fusion (Fase 2, A2-FusionRS)
+        sebagai salah satu token input attention, menggantikan skalar
+        prediksi akhir yang dipakai fusi statis NMF+DecisionTree (Fase 1).
+
+        Method INDEPENDEN dari predict() (duplikasi logika unseen-fallback/
+        batching disengaja, bukan reuse via refactor) -- predict() yang
+        sudah dipakai run_baseline.py/run_baseline_absa.py TIDAK berubah
+        perilaku sama sekali.
+
+        Baris cold-start (user/item unknown) diisi vektor laten NOL --
+        tidak ada representasi laten yang bermakna untuk user/item yang
+        tidak pernah dilihat model saat training.
+
+        Ini adalah versi model PENUH (dilatih di seluruh train_df) -- cocok
+        dipakai apa adanya untuk baris val/test yang genuinely out-of-
+        sample. Untuk baris TRAIN, pakai compute_oof_predictions_with_latent()
+        di bawah (hindari leakage in-sample yang sama seperti predict() vs
+        compute_oof_predictions() biasa).
+        """
+        self.model.eval()
+        rating_min, rating_max = rating_scale
+        scale_range = rating_max - rating_min
+        latent_dim = self.config.hidden_layers[-1]
+
+        user_idx = df["user_id"].map(user2idx)
+        item_idx = df["business_id"].map(item2idx)
+        unknown_mask = user_idx.isna() | item_idx.isna()
+
+        if unknown_mask.any():
+            n_unknown = int(unknown_mask.sum())
+            if unseen_fallback == "error":
+                raise KeyError(
+                    f"{n_unknown} baris memiliki user/item yang tidak dikenal "
+                    "model (kemungkinan cold-start) -- set unseen_fallback="
+                    "'global_mean' jika ingin fallback otomatis."
+                )
+            logger.warning(
+                "%d baris (dari %d) memiliki user/item unknown (cold-start), "
+                "prediksi diisi rating rata-rata skala, laten diisi vektor nol.",
+                n_unknown,
+                len(df),
+            )
+
+        preds = np.full(len(df), rating_min + scale_range / 2, dtype=np.float32)
+        latents = np.zeros((len(df), latent_dim), dtype=np.float32)
+        known_rows = ~unknown_mask.values
+
+        if known_rows.any():
+            u_tensor = torch.tensor(
+                user_idx[known_rows].astype(int).values, dtype=torch.long, device=self.config.device
+            )
+            i_tensor = torch.tensor(
+                item_idx[known_rows].astype(int).values, dtype=torch.long, device=self.config.device
+            )
+            batch_size = self.config.batch_size
+            known_preds = []
+            known_latents = []
+            for start in range(0, len(u_tensor), batch_size):
+                end = start + batch_size
+                p, lat = self.model(u_tensor[start:end], i_tensor[start:end], return_latent=True)
+                known_preds.append(p.cpu().numpy())
+                known_latents.append(lat.cpu().numpy())
+            known_preds = np.concatenate(known_preds)
+            known_latents = np.concatenate(known_latents)
+            preds[known_rows] = known_preds * scale_range + rating_min
+            latents[known_rows] = known_latents
+
+        self.model.train()
+        return preds, latents
+
 
 def compute_oof_predictions(
     train_df: pd.DataFrame,
@@ -396,6 +492,64 @@ def compute_oof_predictions(
         )
 
     return oof_preds
+
+
+def compute_oof_predictions_with_latent(
+    train_df: pd.DataFrame,
+    val_dataset: InteractionDataset,
+    user2idx: dict,
+    item2idx: dict,
+    n_items: int,
+    config: DeepMFConfig,
+    rating_scale: tuple[float, float] = (1.0, 5.0),
+    seed: int = 42,
+    n_folds: int = 5,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Sama persis dengan compute_oof_predictions(), TAPI juga mengembalikan
+    representasi laten OOF per baris train -- dibutuhkan Attention-Gated
+    Fusion (Fase 2, A2-FusionRS) sebagai token modalitas DeepMF, BUKAN
+    diturunkan naif dari model penuh (predict_with_latent() pada train_df
+    setelah fit() di seluruh train_df) -- itu persis leakage in-sample yang
+    compute_oof_predictions() sudah dibuat untuk dihindari (Wolpert 1992,
+    stacked generalization), sekarang berlaku juga utk representasi laten,
+    bukan cuma skalar prediksi.
+
+    Duplikasi struktur loop fold dari compute_oof_predictions() disengaja
+    (konsisten gaya kode fungsi lain di modul ini -- predict_with_latent()
+    vs predict() juga duplikasi, bukan reuse-via-refactor), supaya
+    compute_oof_predictions() yang sudah dipakai run_baseline.py/
+    run_baseline_absa.py TIDAK berubah perilaku sama sekali.
+    """
+    n_users = len(user2idx)
+    latent_dim = config.hidden_layers[-1]
+    oof_preds = np.empty(len(train_df), dtype=np.float32)
+    oof_latents = np.empty((len(train_df), latent_dim), dtype=np.float32)
+    kf = KFold(n_splits=n_folds, shuffle=True, random_state=seed)
+
+    for fold_idx, (fit_pos, holdout_pos) in enumerate(kf.split(np.arange(len(train_df)))):
+        fit_df = train_df.iloc[fit_pos].reset_index(drop=True)
+        holdout_df = train_df.iloc[holdout_pos].reset_index(drop=True)
+
+        fit_dataset = InteractionDataset(
+            fit_df, user2idx, item2idx, n_items, config.negative_sampling_ratio, rating_scale, seed=seed
+        )
+        fold_trainer = DeepMFTrainer(n_users, n_items, config)
+        fold_trainer.fit(fit_dataset, val_dataset)
+        holdout_preds, holdout_latents = fold_trainer.predict_with_latent(
+            holdout_df, user2idx, item2idx, rating_scale
+        )
+        oof_preds[holdout_pos] = holdout_preds
+        oof_latents[holdout_pos] = holdout_latents
+
+        logger.info(
+            "OOF DeepMF (+latent) fold %d/%d selesai (%d baris fit, %d baris holdout diprediksi)",
+            fold_idx + 1,
+            n_folds,
+            len(fit_df),
+            len(holdout_df),
+        )
+
+    return oof_preds, oof_latents
 
 
 if __name__ == "__main__":

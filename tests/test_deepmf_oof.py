@@ -26,8 +26,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.baseline.deepmf import (  # noqa: E402
     DeepMFConfig,
+    DeepMFTrainer,
     InteractionDataset,
     compute_oof_predictions,
+    compute_oof_predictions_with_latent,
 )
 
 RATING_SCALE = (1.0, 5.0)
@@ -93,3 +95,49 @@ def test_compute_oof_predictions_deterministic_with_same_seed(synthetic_interact
         rating_scale=RATING_SCALE, seed=7, n_folds=3,
     )
     np.testing.assert_allclose(preds_a, preds_b)
+
+
+def test_predict_with_latent_scalar_matches_plain_predict(synthetic_interactions):
+    """predict_with_latent() adalah duplikasi predict() (disengaja, lihat
+    docstring) -- skalar prediksi yg dikembalikan HARUS identik dgn
+    predict() biasa pada model & baris yg sama (cuma tambahan laten, bukan
+    forward pass yg beda)."""
+    train_df, val_df, user2idx, item2idx, n_items = synthetic_interactions
+    config = DeepMFConfig(embedding_dim=8, hidden_layers=(16, 8), epochs=2, batch_size=32)
+    n_users = len(user2idx)
+    train_dataset = InteractionDataset(train_df, user2idx, item2idx, n_items, negative_ratio=0, seed=42)
+
+    torch.manual_seed(42)
+    trainer = DeepMFTrainer(n_users, n_items, config)
+    trainer.fit(train_dataset)
+
+    plain_preds = trainer.predict(val_df, user2idx, item2idx, RATING_SCALE)
+    latent_preds, latents = trainer.predict_with_latent(val_df, user2idx, item2idx, RATING_SCALE)
+
+    np.testing.assert_allclose(plain_preds, latent_preds)
+    assert latents.shape == (len(val_df), config.hidden_layers[-1])
+    assert np.isfinite(latents).all()
+
+
+def test_compute_oof_predictions_with_latent_matches_scalar_oof(synthetic_interactions):
+    """compute_oof_predictions_with_latent() harus hasilkan preds skalar
+    yg identik dgn compute_oof_predictions() biasa (seed sama -> fold split
+    & init model sama), plus laten berbentuk benar & tanpa NaN."""
+    train_df, val_df, user2idx, item2idx, n_items = synthetic_interactions
+    config = DeepMFConfig(embedding_dim=8, hidden_layers=(16, 8), epochs=2, batch_size=32)
+    val_dataset = InteractionDataset(val_df, user2idx, item2idx, n_items, negative_ratio=0, seed=42)
+
+    torch.manual_seed(7)
+    scalar_only = compute_oof_predictions(
+        train_df, val_dataset, user2idx, item2idx, n_items, config,
+        rating_scale=RATING_SCALE, seed=7, n_folds=3,
+    )
+    torch.manual_seed(7)
+    scalar_with_latent, oof_latents = compute_oof_predictions_with_latent(
+        train_df, val_dataset, user2idx, item2idx, n_items, config,
+        rating_scale=RATING_SCALE, seed=7, n_folds=3,
+    )
+
+    np.testing.assert_allclose(scalar_only, scalar_with_latent)
+    assert oof_latents.shape == (len(train_df), config.hidden_layers[-1])
+    assert np.isfinite(oof_latents).all()

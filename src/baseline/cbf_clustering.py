@@ -313,6 +313,11 @@ class CBFPredictor:
         self._cluster_centroids = {
             int(c): item_features[labels_arr == c].mean(axis=0) for c in np.unique(labels_arr)
         }
+        # ---- State utk predict_vector_features() (Fase 2 A2-FusionRS,
+        # lihat docstring method itu) -- item_features di sini SUDAH keluaran
+        # fit_transform() (PCA-reduced), sejajar baris dgn item_df["business_id"]
+        self._item_feature_vectors = dict(zip(item_df["business_id"], item_features))
+        self._item_feature_dim = item_features.shape[1]
         self._global_avg_rating = float(train_df["stars"].mean())
         self._sentiment_col = "sentiment_score"  # SAMA dgn default build_item_dataframe()
         self._global_sentiment_mean = (
@@ -482,6 +487,121 @@ class CBFPredictor:
             len(train_df),
         )
         return np.clip(preds, rating_min, rating_max)
+
+    def _user_pref_vectors(self, df: pd.DataFrame) -> np.ndarray:
+        """Vektor preferensi user ATAS SEMUA cluster (bukan cuma cluster yg
+        di-assign ke suatu item) -- dipakai bareng vektor fitur item oleh
+        predict_vector_features()/predict_vector_features_train_loo() di
+        bawah. TIDAK bergantung cluster mana yang di-assign ke item baris
+        ybs (independen dari koreksi LOO), jadi aman dipakai sama persis
+        oleh kedua varian (train-LOO maupun val/test biasa)."""
+        n_clusters = self.clusterer.best_k
+        user_vecs = np.zeros((len(df), n_clusters), dtype=np.float32)
+        pref_lookup = self.user_cluster_pref.set_index(["user_id", "cluster"])["preference"].to_dict()
+        user_ids = df["user_id"].values
+        for idx, user_id in enumerate(user_ids):
+            for cluster in range(n_clusters):
+                pref = pref_lookup.get((user_id, cluster))
+                if pref is not None:
+                    user_vecs[idx, cluster] = pref
+        return user_vecs
+
+    def predict_vector_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Kembalikan representasi VEKTOR (bukan skalar rating) per baris:
+        konkatenasi [vektor fitur item PCA-reduced] + [vektor preferensi
+        user atas SEMUA cluster] -- dibutuhkan Attention-Gated Fusion
+        (Fase 2, A2-FusionRS) sebagai salah satu token input attention,
+        menggantikan skalar rating akhir yang dipakai fusi statis
+        NMF+DecisionTree (Fase 1).
+
+        HANYA utk baris val/test (genuinely out-of-sample, item profile
+        TIDAK exposed thd review baris ybs -- lihat build_item_dataframe()).
+        Utk baris TRAIN, pakai predict_vector_features_train_loo() di bawah
+        (hindari leakage yang sama seperti predict() vs predict_train_loo()
+        skalar).
+
+        Fallback cold-start: vektor item NOL kalau item tidak dikenal sama
+        sekali; entri preferensi user NOL utk cluster yg belum pernah
+        diinteraksi user di train (termasuk user baru -- vektor NOL semua).
+        """
+        if self.item_cluster_labels is None:
+            raise RuntimeError("Panggil fit() terlebih dahulu sebelum predict_vector_features().")
+
+        item_vecs = np.zeros((len(df), self._item_feature_dim), dtype=np.float32)
+        for idx, item_id in enumerate(df["business_id"].values):
+            vec = self._item_feature_vectors.get(item_id)
+            if vec is not None:
+                item_vecs[idx] = vec
+
+        user_vecs = self._user_pref_vectors(df)
+        return np.concatenate([item_vecs, user_vecs], axis=1)
+
+    def predict_vector_features_train_loo(self, train_df: pd.DataFrame) -> np.ndarray:
+        """Sama dgn predict_vector_features(), TAPI KHUSUS baris TRAIN dgn
+        koreksi leave-one-out pada vektor fitur item -- profil item
+        dibangun ULANG per baris, MENGECUALIKAN review baris itu sendiri,
+        persis mekanisme predict_train_loo() (lihat docstring method itu
+        utk motivasi lengkap & pendekatan nearest-centroid approximate yg
+        disengaja), TAPI mengembalikan vektor fitur ter-transform (SEBELUM
+        cluster hard-assignment), bukan skalar prediksi rating.
+
+        Vektor preferensi user (komponen kedua) TIDAK butuh koreksi LOO --
+        independen dari item baris ybs, lihat _user_pref_vectors().
+        """
+        if self.item_cluster_labels is None:
+            raise RuntimeError(
+                "Panggil fit() terlebih dahulu sebelum predict_vector_features_train_loo()."
+            )
+
+        include_sentiment = self.feature_builder.include_sentiment
+        sentiment_col = self._sentiment_col
+
+        item_vecs = np.zeros((len(train_df), self._item_feature_dim), dtype=np.float32)
+        row_pos = {rid: i for i, rid in enumerate(train_df["review_id"].values)}
+
+        for iid, grp in train_df.groupby("business_id"):
+            rids = grp["review_id"].tolist()
+            texts = grp["text_tfidf"].tolist()
+            ratings = grp["stars"].tolist()
+            sentiments = grp[sentiment_col].tolist() if include_sentiment else None
+            n = len(grp)
+
+            if n == 1:
+                loo_texts = [""]
+                loo_avg_ratings = [self._global_avg_rating]
+                loo_review_counts = [0]
+                loo_sentiments = [self._global_sentiment_mean] if include_sentiment else None
+            else:
+                total_rating = sum(ratings)
+                total_sentiment = sum(sentiments) if sentiments is not None else None
+                loo_texts, loo_avg_ratings, loo_review_counts = [], [], []
+                loo_sentiments = [] if sentiments is not None else None
+                for j in range(n):
+                    loo_texts.append(" ".join(texts[:j] + texts[j + 1 :]))
+                    loo_avg_ratings.append((total_rating - ratings[j]) / (n - 1))
+                    loo_review_counts.append(n - 1)
+                    if sentiments is not None:
+                        loo_sentiments.append((total_sentiment - sentiments[j]) / (n - 1))
+
+            cat = self._item_categories.get(iid, [])
+            mini_df = pd.DataFrame(
+                {
+                    "business_id": [iid] * n,
+                    "categories_list": [cat] * n,
+                    "description_text": loo_texts,
+                    "review_count": loo_review_counts,
+                    "avg_rating": loo_avg_ratings,
+                }
+            )
+            if include_sentiment:
+                mini_df["sentiment_agg"] = loo_sentiments
+
+            corrected_features = self.feature_builder.transform(mini_df)  # (n, D)
+            for j in range(n):
+                item_vecs[row_pos[rids[j]]] = corrected_features[j]
+
+        user_vecs = self._user_pref_vectors(train_df)
+        return np.concatenate([item_vecs, user_vecs], axis=1)
 
 
 if __name__ == "__main__":
