@@ -79,6 +79,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
+from src.a2fusionrs.bias_baseline import DEFAULT_BIAS_DAMPING, UserItemBiasBaseline
 from src.a2fusionrs.selection_split import SELECTION_DEV_FRACTION, split_train_fit_dev
 from src.a2fusionrs.pyabsa_scorer import (
     ABSA_VECTOR_FEATURE_NAMES,
@@ -556,9 +557,10 @@ def run_pipeline(
     """
     if representation not in ("vector", "asymmetric"):
         raise ValueError(f"representation '{representation}' -- pakai 'vector' atau 'asymmetric'.")
-    if residual_base not in ("none", "static_fusion", "static_fusion_oof"):
+    if residual_base not in ("none", "user_item_bias", "static_fusion", "static_fusion_oof"):
         raise ValueError(
-            f"residual_base '{residual_base}' -- pakai 'none'/'static_fusion'/'static_fusion_oof'."
+            f"residual_base '{residual_base}' -- pakai 'none'/'user_item_bias'/"
+            "'static_fusion'/'static_fusion_oof'."
         )
     if extra_pyabsa not in ("none", "rich", "summary", "perseq", "perseq_rich"):
         raise ValueError(
@@ -872,12 +874,38 @@ def run_pipeline(
             if "pyabsa" not in modalities:
                 modalities = modalities + ["pyabsa"]
 
-        # RESIDUAL base: base = prediksi NMF+DecisionTree (sama spt A2-IRM)
-        # atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar koreksi di
-        # atasnya. "static_fusion" (in-fold) CACAT -- disimpan HANYA utk
-        # perbandingan. "static_fusion_oof" (BENAR) -- base train OOF.
+        # RESIDUAL base ("jangkar"): AGF belajar KOREKSI di atas prediksi
+        # base, bukan meregresi level rating dari nol lewat sigmoid.
+        # - "user_item_bias" (BERSIH, dipakai arsitektur a2fusionrs_clean):
+        #   mu + b_u + b_i klasik MF, prior statistik standar literatur --
+        #   BUKAN mekanisme fusi saingan, jadi tidak kontradiktif dgn klaim
+        #   "AGF menggantikan fusi statis". Train pakai LOO analitik.
+        # - "static_fusion"/"static_fusion_oof" (LAMA): base = NMF+DT, hanya
+        #   utk skenario non-clean; dilarang keras di skenario clean (guard
+        #   di awal run_pipeline). "static_fusion" in-fold CACAT -- disimpan
+        #   HANYA utk perbandingan historis.
         base_norm = None
-        if residual_base in ("static_fusion", "static_fusion_oof"):
+        if residual_base == "user_item_bias":
+            bias_model = UserItemBiasBaseline(damping=DEFAULT_BIAS_DAMPING)
+            bias_model.fit(train_df)
+            base_raw = {
+                "train": bias_model.predict_train_loo(train_df, rating_scale),
+                "val": bias_model.predict(val_df, rating_scale),
+                "test": bias_model.predict(test_df, rating_scale),
+            }
+            base_norm = {
+                split: ((base_raw[split] - rating_min) / scale_range).astype(np.float32)
+                for split in ("train", "val", "test")
+            }
+            base_eval_rmse = float(
+                np.sqrt(np.mean((base_raw["test"] - test_df["stars"].values) ** 2))
+            )
+            logger.info(
+                "JANGKAR user_item_bias AKTIF (mu+b_u+b_i, damping=%.1f, train pakai LOO): "
+                "RMSE base di split evaluasi=%.4f -- AGF belajar koreksi di atas ini.",
+                DEFAULT_BIAS_DAMPING, base_eval_rmse,
+            )
+        elif residual_base in ("static_fusion", "static_fusion_oof"):
             fusion_config = FusionConfig(
                 nmf_components=config["fusion_baseline"]["nmf_components"],
                 dt_max_depth=config["fusion_baseline"]["dt_max_depth"],
@@ -1134,9 +1162,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--residual-base", type=str, default="none",
-        choices=["none", "static_fusion", "static_fusion_oof"],
-        help="AGF belajar KOREKSI di atas base NMF+DT. 'static_fusion_oof' = base train "
-        "out-of-fold (stacking BENAR); 'static_fusion' = in-fold (cacat, utk perbandingan).",
+        choices=["none", "user_item_bias", "static_fusion", "static_fusion_oof"],
+        help="JANGKAR: AGF belajar KOREKSI di atas prediksi base. 'user_item_bias' = mu+b_u+b_i "
+        "klasik MF (BERSIH, dipakai arsitektur a2fusionrs_clean; train pakai LOO). "
+        "'static_fusion_oof' = base NMF+DT train out-of-fold (LAMA, dilarang di skenario clean); "
+        "'static_fusion' = in-fold (cacat, hanya utk perbandingan historis).",
     )
     parser.add_argument(
         "--weight-decay", type=float, default=None,
