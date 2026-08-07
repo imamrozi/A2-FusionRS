@@ -1,10 +1,17 @@
 """
 tests/test_split_train_fit_dev.py
 
-Regresi utk split_train_fit_dev() (scripts/tune_deepmf_oof_val.py) -- Fix
-Temuan A2 audit metodologi (reports/methodology_audit_2026-07-26.md):
-pisah train_df jadi train_fit (fitting) + selection_dev (seleksi kandidat,
-independen dari val early-stopping).
+Regresi utk split_train_fit_dev() -- Fix Temuan A2 audit metodologi
+(reports/methodology_audit_2026-07-26.md): pisah train_df jadi train_fit
+(fitting) + selection_dev (seleksi kandidat, independen dari val
+early-stopping).
+
+CATATAN: fungsi ini DIPINDAH dari scripts/tune_deepmf_oof_val.py ke
+src/a2fusionrs/selection_split.py (2026-08-07) supaya bisa dipakai ulang
+oleh run_attention_gated_fusion.py utk seleksi arsitektur A2-FusionRS
+Fase 2. Import di sini disederhanakan jadi import modul biasa (tidak lagi
+perlu importlib hack utk memuat script level-atas); PERILAKU fungsi tidak
+berubah, jadi seluruh assert di bawah tetap sama persis.
 """
 
 from __future__ import annotations
@@ -19,14 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-import importlib.util
-
-_spec = importlib.util.spec_from_file_location(
-    "tune_deepmf_oof_val", _REPO_ROOT / "scripts" / "tune_deepmf_oof_val.py"
-)
-_module = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_module)
-split_train_fit_dev = _module.split_train_fit_dev
+from src.a2fusionrs.selection_split import split_train_fit_dev  # noqa: E402
 
 
 @pytest.fixture

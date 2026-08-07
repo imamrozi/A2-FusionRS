@@ -164,8 +164,10 @@ def aggregate_multi_seed_results(results: list[RunResult]) -> pd.DataFrame:
     return summary
 
 
-def save_results_yaml(path: str | Path, results_summary: dict, config: dict | None = None) -> None:
-    """Simpan hasil evaluasi ke YAML dengan 2 pengaman, dipanggil identik oleh
+def save_results_yaml(
+    path: str | Path, results_summary: dict, config: dict | None = None, overwrite: bool = True
+) -> None:
+    """Simpan hasil evaluasi ke YAML dengan 3 pengaman, dipanggil identik oleh
     run_baseline.py, run_baseline_absa.py, dan run_classical_cf.py:
 
     1. WARNING eksplisit kalau path ini akan MENIMPA hasil yang sudah ada
@@ -178,9 +180,19 @@ def save_results_yaml(path: str | Path, results_summary: dict, config: dict | No
        `config` diberikan -- supaya hasil bisa diaudit ulang nanti (hyper-
        parameter apa yang menghasilkan angka ini) tanpa perlu menebak dari
        nama file log yang mungkin disimpan manual atau lupa disimpan.
+    3. `overwrite=False` -> penimpaan GAGAL KERAS (FileExistsError), bukan
+       cuma warning. Dipakai run yang mahal/sekali-jalan (mis. stage=confirm
+       A2-FusionRS Fase 2 yang menyentuh test set) supaya kelalaian
+       menjalankan ulang tidak diam-diam merusak hasil yang sudah dilaporkan.
+       Default True = perilaku LAMA, jadi 3 runner Fase 1 tidak berubah.
     """
     path = Path(path)
     if path.exists():
+        if not overwrite:
+            raise FileExistsError(
+                f"Hasil sudah ada di {path} dan overwrite=False -- menolak menimpa. "
+                "Hapus/arsipkan file lama secara eksplisit kalau memang ingin menjalankan ulang."
+            )
         try:
             with open(path) as f:
                 old = yaml.safe_load(f) or {}

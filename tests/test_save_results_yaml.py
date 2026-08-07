@@ -96,6 +96,29 @@ def test_save_results_yaml_atomic_write_leaves_no_tmp_file(tmp_path):
     assert not (tmp_path / "atomic_test.yaml.tmp").exists()
 
 
+def test_save_results_yaml_overwrite_false_raises_instead_of_clobbering(tmp_path):
+    """overwrite=False -> penimpaan GAGAL KERAS (FileExistsError) dan file
+    LAMA tetap utuh. Dipakai run stage=confirm A2-FusionRS Fase 2 yang
+    menyentuh test set & hanya boleh sekali jalan."""
+    path = tmp_path / "confirm_result.yaml"
+    save_results_yaml(path, {"rmse": np.float64(0.5), "tag": "asli"})
+
+    with pytest.raises(FileExistsError, match="overwrite=False"):
+        save_results_yaml(path, {"rmse": np.float64(0.9), "tag": "baru"}, overwrite=False)
+
+    # file lama HARUS tidak tersentuh
+    loaded = yaml.safe_load(path.read_text())
+    assert loaded["rmse"] == pytest.approx(0.5)
+    assert loaded["tag"] == "asli"
+
+
+def test_save_results_yaml_overwrite_false_ok_when_file_absent(tmp_path):
+    """overwrite=False TIDAK menghalangi penulisan pertama kali."""
+    path = tmp_path / "fresh.yaml"
+    save_results_yaml(path, {"rmse": np.float64(0.7)}, overwrite=False)
+    assert yaml.safe_load(path.read_text())["rmse"] == pytest.approx(0.7)
+
+
 def test_save_results_yaml_overwrite_warns_with_old_and_new_rmse(tmp_path, caplog):
     """Perilaku existing (WAJIB tetap ada -- lihat docstring save_results_yaml
     soal insiden penimpaan senyap sebelumnya): overwrite men-log RMSE lama vs

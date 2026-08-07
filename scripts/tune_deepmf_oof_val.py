@@ -87,6 +87,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from src.a2fusionrs.selection_split import SELECTION_DEV_FRACTION, split_train_fit_dev
 from src.baseline.cbf_clustering import CBFConfig, CBFPredictor
 from src.baseline.deepmf import DeepMFConfig, DeepMFTrainer, InteractionDataset, compute_oof_predictions
 from src.baseline.fusion_nmf_dt import FusionConfig, NMFDecisionTreeFusion
@@ -101,7 +102,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 RATING_SCALE = (1.0, 5.0)
-SELECTION_DEV_FRACTION = 0.15  # porsi train_df asli disisihkan jadi selection_dev
+# SELECTION_DEV_FRACTION & split_train_fit_dev() dipindah ke
+# src/a2fusionrs/selection_split.py (di-import di atas) supaya bisa dipakai
+# ulang oleh run_attention_gated_fusion.py -- perilaku TIDAK berubah.
 
 DEFAULTS = {
     "optimizer": "adamw",
@@ -129,27 +132,6 @@ ALL_STAGES: dict[str, list[dict]] = {
     "stage3_epochs": [{"epochs": v} for v in [5, 10, 15, 20, 30]],
     "stage4_weight_decay": [{"weight_decay": v} for v in [0.0001, 0.001, 0.01, 0.05]],
 }
-
-
-def split_train_fit_dev(train_df: pd.DataFrame, seed: int, dev_fraction: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Pisah train_df asli jadi train_fit (fitting) + selection_dev (seleksi
-    kandidat) -- SEKALI, deterministik thd seed, row-based (bukan user-based
-    spt split_generator.py; ini split INTERNAL khusus script ini, TIDAK
-    menyentuh/menggantikan file split bersama). Lihat docstring modul utk
-    alasan lengkap (Fix Temuan A2).
-    """
-    rng = np.random.RandomState(seed)
-    shuffled_idx = rng.permutation(len(train_df))
-    n_dev = int(len(train_df) * dev_fraction)
-    dev_idx = shuffled_idx[:n_dev]
-    fit_idx = shuffled_idx[n_dev:]
-    train_fit = train_df.iloc[fit_idx].reset_index(drop=True)
-    selection_dev = train_df.iloc[dev_idx].reset_index(drop=True)
-    logger.info(
-        "split_train_fit_dev: train_fit=%d baris, selection_dev=%d baris (%.1f%% dari train asli %d baris)",
-        len(train_fit), len(selection_dev), 100.0 * dev_fraction, len(train_df),
-    )
-    return train_fit, selection_dev
 
 
 def load_checkpoint(csv_path: Path) -> dict[tuple[str, str], float]:

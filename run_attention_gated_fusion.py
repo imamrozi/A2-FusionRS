@@ -79,6 +79,7 @@ from sklearn.preprocessing import StandardScaler
 
 from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
+from src.a2fusionrs.selection_split import SELECTION_DEV_FRACTION, split_train_fit_dev
 from src.a2fusionrs.pyabsa_scorer import (
     ABSA_VECTOR_FEATURE_NAMES,
     build_aspect_sequences,
@@ -479,6 +480,9 @@ def run_pipeline(
     extra_pyabsa: str = "none",
     run_tag: str = "",
     export_interpretability: bool = False,
+    stage: str = "select",
+    dev_fraction: float = SELECTION_DEV_FRACTION,
+    results_subdir: str = "results_phase2_clean",
 ) -> None:
     """`input_standardize` & `use_scalar_preds` adalah 2 DIAGNOSTIK -- HANYA
     berlaku untuk skenario AGF (bukan static_pyabsa/weighted_avg):
@@ -504,6 +508,17 @@ def run_pipeline(
 
     `run_tag`: suffix ke nama file hasil supaya run diagnostik TIDAK menimpa
     hasil utama (mis. run_tag='norm' -> agf_full_agf_norm_...yaml).
+
+    `stage` (PROTOKOL ANTI-P-HACKING, lihat src/a2fusionrs/selection_split.py):
+    - "select"  -> evaluasi pada `selection_dev` (potongan dari TRAIN, via
+      split_train_fit_dev). Test set ASLI TIDAK PERNAH disentuh -- bahkan
+      tidak ikut membangun universe item CBF. Dipakai utk MEMILIH antar
+      varian arsitektur. DEFAULT (fail-safe: kalau lupa set, yang kepakai
+      dev, bukan test).
+    - "confirm" -> evaluasi pada TEST set asli. HANYA dijalankan SEKALI,
+      setelah varian pemenang dikunci dari tahap "select".
+    Pemisahan peran: val = early-stopping saja; selection_dev = seleksi;
+    test = konfirmasi akhir sekali.
     """
     if representation not in ("vector", "asymmetric"):
         raise ValueError(f"representation '{representation}' -- pakai 'vector' atau 'asymmetric'.")
@@ -515,6 +530,8 @@ def run_pipeline(
         raise ValueError(f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'/'perseq'.")
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
+    if stage not in ("select", "confirm"):
+        raise ValueError(f"stage '{stage}' -- pakai 'select' (evaluasi di dev) atau 'confirm' (di test).")
 
     exp_cfg = config["experiment"]
     split_cfg = config["split"]
@@ -529,6 +546,28 @@ def run_pipeline(
     split_output_dir = Path(split_cfg["output_dir"])
     splits_raw = UserBasedSplitGenerator.load(split_output_dir)
     train_df, val_df, test_df = splits_raw["train"], splits_raw["val"], splits_raw["test"]
+
+    # PROTOKOL SELEKSI: pada stage="select", slot evaluasi diisi selection_dev
+    # (potongan TRAIN), dan test asli DIBUANG dari seluruh alur -- termasuk
+    # dari `full_df_for_items` CBF di Tahap 6, sehingga teks/rating test tidak
+    # pernah ikut membentuk profil item pun. Ini membuat seleksi arsitektur
+    # mustahil "mengintip" test, sekaligus konsisten dgn Fix Temuan A2.
+    if stage == "select":
+        train_df, dev_df = split_train_fit_dev(train_df, exp_cfg["seed"], dev_fraction)
+        test_df = dev_df
+        eval_split_label = "selection_dev"
+        logger.info(
+            "=== STAGE=SELECT: evaluasi memakai selection_dev (%d baris, %.0f%% dari train asli). "
+            "TEST SET ASLI TIDAK DISENTUH SAMA SEKALI. ===",
+            len(dev_df), dev_fraction * 100,
+        )
+    else:
+        eval_split_label = "test"
+        logger.info(
+            "=== STAGE=CONFIRM: evaluasi memakai TEST set asli (%d baris). "
+            "Pastikan varian sudah dikunci dari tahap select. ===",
+            len(test_df),
+        )
 
     # ---------- 3. Preprocessing ----------
     logger.info("=== Tahap 3: Preprocessing teks ===")
@@ -886,7 +925,13 @@ def run_pipeline(
                 rmse, mae, train_time, predict_time, n_params)
     logger.info("=" * 60)
 
-    results_dir = Path(config["logging"]["checkpoint_dir"]).parent / "results"
+    # ISOLASI HASIL (anti-tumpuk): hasil Fase 2 "clean" ditulis ke direktori
+    # TERPISAH dari checkpoints/results/ (yg memuat hasil A2-IRM + triage
+    # lama), lalu dipisah lagi per stage. Tiga lapis proteksi: direktori
+    # terpisah + subfolder stage + label skenario baru -> mustahil menimpa
+    # hasil lama secara tidak sengaja.
+    stage_subdir = "dev" if stage == "select" else "test"
+    results_dir = Path(config["logging"]["checkpoint_dir"]).parent / results_subdir / stage_subdir
     results_dir.mkdir(parents=True, exist_ok=True)
     # run_tag disisipkan ke prefix supaya run diagnostik TIDAK menimpa hasil
     # utama (agf_{scenario}_{domain}_seed{seed}.yaml).
@@ -895,15 +940,34 @@ def run_pipeline(
     model_name = f"a2fusionrs_agf_{scenario}{tag_suffix}"
     results_path = results_dir / f"{results_prefix}_{exp_cfg['domain']}_seed{exp_cfg['seed']}.yaml"
 
+    # val RMSE dicatat EKSPLISIT (sebelumnya TIDAK pernah disimpan sama
+    # sekali -- akibatnya perbandingan antar-varian terpaksa memakai metrik
+    # test = p-hacking). Hanya tersedia utk skenario AGF (yg punya trainer).
+    val_rmse = None
+    if scenario in AGF_SCENARIOS:
+        rating_min, rating_max = rating_scale
+        val_rmse_norm = agf_trainer.evaluate_rmse(
+            build_features("val"), val_y_norm,
+            base_norm=(base_norm["val"] if base_norm else None),
+            aspect_seq=(aspect_seq["val"] if aspect_seq else None),
+        )
+        val_rmse = float(val_rmse_norm * (rating_max - rating_min))
+
     results_summary = {
         "model_name": model_name,
         "domain": exp_cfg["domain"],
         "seed": exp_cfg["seed"],
         "scenario": scenario,
         "absa_source": absa_source,
-        "n_test_samples": int(len(test_df)),
-        "rmse": rmse,
+        # --- protokol evaluasi (anti-p-hacking) ---
+        "stage": stage,
+        "eval_split": eval_split_label,
+        "dev_fraction": dev_fraction if stage == "select" else None,
+        "n_eval_samples": int(len(test_df)),
+        "n_test_samples": int(len(test_df)),  # alias historis (kompatibilitas)
+        "rmse": rmse,   # CATATAN: pada stage=select ini adalah dev-RMSE, bukan test
         "mae": mae,
+        "val_rmse": val_rmse,
         # Instrumentasi efisiensi (Tier 3, dicatat sejak awal -- lihat
         # attention_gated_fusion_design.md Bagian 3 poin 8).
         "train_time_seconds": train_time,
@@ -915,10 +979,17 @@ def run_pipeline(
         "residual_base": residual_base,
         "extra_pyabsa": extra_pyabsa,
         "run_tag": run_tag,
-        "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}'"
+        "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}', "
+        f"stage '{stage}' (evaluasi di {eval_split_label})"
         + (f" [DIAGNOSTIK: {run_tag}]" if run_tag else "."),
     }
-    save_results_yaml(results_path, results_summary, config=config)
+    # stage=confirm menyentuh TEST set dan hanya boleh dijalankan sekali ->
+    # penimpaan GAGAL KERAS supaya run ulang yang tidak disengaja tidak
+    # diam-diam merusak angka yang sudah dilaporkan. stage=select boleh
+    # ditimpa (memang iteratif saat eksplorasi arsitektur).
+    save_results_yaml(
+        results_path, results_summary, config=config, overwrite=(stage == "select")
+    )
 
     predictions_path = results_dir / f"predictions_{results_path.stem}.csv"
     save_predictions(predictions_path, test_df, test_final_preds)
@@ -992,6 +1063,22 @@ if __name__ == "__main__":
         help="Ekspor atensi per-aspek (studi kasus) + uji faithfulness perturbasi. "
         "HANYA berlaku utk --extra-pyabsa perseq (AspectSequencePooling).",
     )
+    parser.add_argument(
+        "--stage", type=str, default="select", choices=["select", "confirm"],
+        help="PROTOKOL ANTI-P-HACKING. 'select' (DEFAULT, fail-safe) = evaluasi di selection_dev "
+        "(potongan train); TEST TIDAK DISENTUH -- dipakai utk memilih antar varian arsitektur. "
+        "'confirm' = evaluasi di TEST asli, HANYA dijalankan SEKALI setelah varian dikunci.",
+    )
+    parser.add_argument(
+        "--dev-fraction", type=float, default=SELECTION_DEV_FRACTION,
+        help=f"Porsi train yang disisihkan jadi selection_dev saat --stage select (default {SELECTION_DEV_FRACTION}).",
+    )
+    parser.add_argument(
+        "--results-subdir", type=str, default="results_phase2_clean",
+        help="Subdirektori hasil di bawah checkpoints/ (default 'results_phase2_clean') -- TERPISAH "
+        "dari 'results/' yang memuat hasil A2-IRM & triage lama, supaya tidak mungkin tertimpa. "
+        "Hasil dipisah lagi per stage: <subdir>/dev/ dan <subdir>/test/.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -1008,4 +1095,7 @@ if __name__ == "__main__":
         extra_pyabsa=args.extra_pyabsa,
         run_tag=args.run_tag,
         export_interpretability=args.export_interpretability,
+        stage=args.stage,
+        dev_fraction=args.dev_fraction,
+        results_subdir=args.results_subdir,
     )
