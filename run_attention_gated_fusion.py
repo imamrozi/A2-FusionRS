@@ -169,8 +169,27 @@ AGF_SCENARIOS: dict[str, dict] = {
 # juga membaik dgn PyABSA, atau cuma AGF?" -- kalau tree+pyabsa ~= AGF+
 # pyabsa, PyABSA-nya yg komplementer (AGF bukan mekanisme unik); kalau
 # tree+pyabsa jauh lebih buruk, AGF mengeksploitasi PyABSA lebih baik.
-NON_AGF_SCENARIOS = ("static_pyabsa", "weighted_avg", "static_keyword_pyabsa")
+# Skenario yang TIDAK memakai AttentionGatedFusionTrainer sama sekali
+# (fusi statis NMF+DecisionTree atau regresi linear). Dict, bukan tuple,
+# supaya bisa membawa metadata `skip_absa` seperti AGF_SCENARIOS.
+NON_AGF_SCENARIOS: dict[str, dict] = {
+    "static_pyabsa": dict(skip_absa=False),         # tree + PyABSA 5-dim (via absa_source)
+    "weighted_avg": dict(skip_absa=False),          # regresi linear atas 3 skalar
+    "static_keyword_pyabsa": dict(skip_absa=False), # tree + [keyword ABSA, PyABSA-rich]
+    # SEL C faktorial: tree + PyABSA-rich SAJA (tanpa keyword-ABSA sama
+    # sekali). Ini pasangan "fusi statis" untuk sel D0 (AGF + PyABSA-rich),
+    # sehingga efek MEKANISME FUSI bisa diisolasi dgn informasi dikonstankan.
+    # Memakai rich 9-dim (bukan 5-dim summary spt static_pyabsa) karena itu
+    # representasi PyABSA TERKAYA yang secara struktural bisa dikonsumsi
+    # tree -- tree tidak bisa menerima sequence panjang-variabel.
+    "static_pyabsa_rich": dict(skip_absa=True),
+}
 ALL_SCENARIOS = list(AGF_SCENARIOS) + list(NON_AGF_SCENARIOS)
+
+
+def _scenario_meta(scenario: str) -> dict:
+    """Metadata skenario dari salah satu dari dua registry."""
+    return AGF_SCENARIOS.get(scenario) or NON_AGF_SCENARIOS.get(scenario, {})
 
 
 def _compute_absa_features(
@@ -579,8 +598,12 @@ def run_pipeline(
         raise ValueError(f"stage '{stage}' -- pakai 'select' (evaluasi di dev) atau 'confirm' (di test).")
 
     # ---- Guard arsitektur "clean" (dikunci struktural, bukan konvensi) ----
-    skip_absa = AGF_SCENARIOS.get(scenario, {}).get("skip_absa", False)
-    if skip_absa:
+    skip_absa = _scenario_meta(scenario).get("skip_absa", False)
+    if scenario == "a2fusionrs_clean":
+        # Guard ini SPESIFIK utk arsitektur AGF bersih -- BUKAN utk semua
+        # skenario skip_absa. `static_pyabsa_rich` juga skip_absa TAPI memang
+        # SENGAJA memakai tree (ia sel pembanding "fusi statis" di faktorial),
+        # jadi tidak boleh kena larangan ini.
         if residual_base in ("static_fusion", "static_fusion_oof"):
             raise ValueError(
                 f"scenario '{scenario}' adalah arsitektur BERSIH (PyABSA + AGF) yang secara "
@@ -588,13 +611,21 @@ def run_pipeline(
                 f"residual base ('{residual_base}') kontradiktif secara arsitektural. "
                 "Pakai --residual-base none atau user_item_bias."
             )
-        if extra_pyabsa not in ("perseq", "perseq_rich"):
+        if extra_pyabsa == "none":
             raise ValueError(
                 f"scenario '{scenario}' tidak memakai stream ABSA keyword sama sekali, jadi "
-                f"sentimen HARUS masuk lewat PyABSA per-aspek: --extra-pyabsa perseq atau "
-                f"perseq_rich (diberikan: '{extra_pyabsa}'). Tanpa itu model tidak punya "
-                "sinyal sentimen apa pun."
+                "sentimen HARUS masuk lewat PyABSA: --extra-pyabsa perseq_rich (arsitektur "
+                "target), atau perseq/rich/summary utk sel ablasi. Dgn 'none' model tidak "
+                "punya sinyal sentimen apa pun."
             )
+    if scenario == "static_pyabsa_rich" and extra_pyabsa != "none":
+        # Sel C menghitung PyABSA-rich-nya sendiri di Tahap 7; --extra-pyabsa
+        # hanya berlaku utk jalur AGF, jadi memberikannya di sini menyesatkan.
+        raise ValueError(
+            f"scenario 'static_pyabsa_rich' (fusi statis) mengambil PyABSA-rich secara internal; "
+            f"--extra-pyabsa hanya berlaku utk skenario AGF (diberikan: '{extra_pyabsa}'). "
+            "Jalankan tanpa --extra-pyabsa."
+        )
 
     exp_cfg = config["experiment"]
     split_cfg = config["split"]
@@ -841,6 +872,33 @@ def run_pipeline(
         test_final_preds = np.clip(lr.predict(X_test), rating_scale[0], rating_scale[1])
         predict_time = time.time() - t0
         n_params = X_train.shape[1] + 1  # bobot + intercept
+
+    elif scenario == "static_pyabsa_rich":
+        # SEL C faktorial: fusi STATIS (NMF+DT) + PyABSA-rich 9-dim SAJA
+        # (tanpa keyword-ABSA). Pasangan langsung sel D0 (AGF + PyABSA-rich):
+        # informasi sentimen IDENTIK, yang berbeda hanya MEKANISME FUSI ->
+        # selisihnya mengisolasi efek fusi dinamis.
+        splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
+        pyabsa_rich = _compute_pyabsa_rich_modality(config, exp_cfg, splits_for_pyabsa, rich=True)
+        fusion_config = FusionConfig(
+            nmf_components=config["fusion_baseline"]["nmf_components"],
+            dt_max_depth=config["fusion_baseline"]["dt_max_depth"],
+            random_state=exp_cfg["seed"],
+        )
+        fusion_model = NMFDecisionTreeFusion(fusion_config)
+        t0 = time.time()
+        fusion_model.fit(
+            sentiment_scores=pyabsa_rich["train"], deepmf_preds=deepmf_scalar["train"],
+            cbf_preds=cbf_scalar["train"], y_true_ratings=train_df["stars"].values,
+        )
+        train_time = time.time() - t0
+        t0 = time.time()
+        test_final_preds = np.clip(
+            fusion_model.predict(pyabsa_rich["test"], deepmf_scalar["test"], cbf_scalar["test"]),
+            rating_scale[0], rating_scale[1],
+        )
+        predict_time = time.time() - t0
+        logger.info("SEL C faktorial: tree NMF+DT([PyABSA-rich 9-dim, deepmf, cbf]) -- tanpa keyword.")
 
     elif scenario == "static_keyword_pyabsa":
         # KONTROL ATRIBUSI: tree NMF+DT (sama spt A2-IRM) TAPI sentiment =
