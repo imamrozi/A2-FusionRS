@@ -1,0 +1,5 @@
+variant,variant_label,mean_rank,mean_rmse_normalized,n_domains
+user_item_bias_asymmetric,jangkar bias + skalar,2.0,1.0034809165467378,3
+user_item_bias_vector,jangkar bias + vektor,2.0,1.0055465067482217,3
+none_vector,tanpa jangkar + vektor,2.3333333333333335,1.0108142016896007,3
+none_asymmetric,tanpa jangkar + skalar,3.6666666666666665,1.0163768582103516,3

@@ -1,0 +1,13 @@
+domain,variant,variant_label,dev_rmse_mean,dev_rmse_std,n_seeds,rank,rmse_normalized
+amazon_electronics,none_asymmetric,tanpa jangkar + skalar,0.7837599522023525,0.0033723924682853446,3,3.0,1.0233487861625736
+amazon_electronics,none_vector,tanpa jangkar + vektor,0.7876001697721847,0.016942434883491397,3,4.0,1.0283629259864382
+amazon_electronics,user_item_bias_asymmetric,jangkar bias + skalar,0.7658776389830407,0.006582805851062875,3,1.0,1.0
+amazon_electronics,user_item_bias_vector,jangkar bias + vektor,0.7717359020104912,0.02347964065665112,3,2.0,1.0076490848266955
+restaurant,none_asymmetric,tanpa jangkar + skalar,0.7461816987518776,0.0040915538659838276,3,4.0,1.0105889455621389
+restaurant,none_vector,tanpa jangkar + vektor,0.7383632109065026,0.005659168170327704,3,1.0,1.0
+restaurant,user_item_bias_asymmetric,jangkar bias + skalar,0.7417232941103066,0.005189656878972053,3,2.0,1.0045507186086353
+restaurant,user_item_bias_vector,jangkar bias + vektor,0.7450014176691623,0.012532194722243595,3,3.0,1.0089904354179697
+tripadvisor_hotel,none_asymmetric,tanpa jangkar + skalar,0.6773079831685136,0.004897464847065756,3,4.0,1.0151928429063426
+tripadvisor_hotel,none_vector,tanpa jangkar + vektor,0.6698935942385327,0.006628311436779203,3,2.0,1.0040796790823634
+tripadvisor_hotel,user_item_bias_asymmetric,jangkar bias + skalar,0.6711027442557844,0.0017420655774423833,3,3.0,1.005892031031578
+tripadvisor_hotel,user_item_bias_vector,jangkar bias + vektor,0.6671717476154421,0.004291585813631766,3,1.0,1.0
