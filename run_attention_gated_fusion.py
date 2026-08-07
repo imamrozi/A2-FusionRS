@@ -81,6 +81,12 @@ from src.a2fusionrs.absa_bert import ABSAConfig, KeywordAspectSentimentScorer
 from src.a2fusionrs.attention_gated_fusion import AGFConfig, AttentionGatedFusionTrainer
 from src.a2fusionrs.bias_baseline import DEFAULT_BIAS_DAMPING, UserItemBiasBaseline
 from src.a2fusionrs.selection_split import SELECTION_DEV_FRACTION, split_train_fit_dev
+from src.a2fusionrs.stream_cache import (
+    StreamCacheUnsafeError,
+    build_cache_key,
+    load_streams,
+    save_streams,
+)
 from src.a2fusionrs.pyabsa_scorer import (
     ABSA_VECTOR_FEATURE_NAMES,
     build_aspect_sequences,
@@ -518,6 +524,7 @@ def run_pipeline(
     stage: str = "select",
     dev_fraction: float = SELECTION_DEV_FRACTION,
     results_subdir: str = "results_phase2_clean",
+    stream_cache: bool = False,
 ) -> None:
     """`input_standardize` & `use_scalar_preds` adalah 2 DIAGNOSTIK -- HANYA
     berlaku untuk skenario AGF (bukan static_pyabsa/weighted_avg):
@@ -661,85 +668,132 @@ def run_pipeline(
         )
         absa_features = absa_result["features"]
 
-    # ---------- 5. DeepMF (predict_with_latent + OOF utk train) ----------
-    logger.info("=== Tahap 5: Training DeepMF ===")
-    all_users = pd.concat([train_df["user_id"], val_df["user_id"], test_df["user_id"]]).unique()
-    all_items = pd.concat(
-        [train_df["business_id"], val_df["business_id"], test_df["business_id"]]
-    ).unique()
-    user2idx = {u: i for i, u in enumerate(all_users)}
-    item2idx = {b: i for i, b in enumerate(all_items)}
-
-    deepmf_config = DeepMFConfig(
-        embedding_dim=config["deepmf"]["embedding_dim"],
-        hidden_layers=tuple(config["deepmf"]["hidden_layers"]),
-        dropout=config["deepmf"]["dropout"],
-        batch_size=config["deepmf"]["batch_size"],
-        learning_rate=config["deepmf"]["learning_rate"],
-        epochs=config["deepmf"].get("epochs", 20),
-        negative_sampling_ratio=config["deepmf"]["negative_sampling_ratio"],
-        optimizer=config["deepmf"].get("optimizer", "adamw"),
-        weight_decay=config["deepmf"].get("weight_decay", 0.0),
-    )
-    train_interactions = InteractionDataset(
-        train_df, user2idx, item2idx, len(all_items), deepmf_config.negative_sampling_ratio, seed=exp_cfg["seed"]
-    )
-    val_interactions = InteractionDataset(
-        val_df, user2idx, item2idx, len(all_items), negative_ratio=0, seed=exp_cfg["seed"]
-    )
-    torch.manual_seed(exp_cfg["seed"])
-    deepmf_trainer = DeepMFTrainer(len(all_users), len(all_items), deepmf_config)
-    deepmf_trainer.fit(train_interactions, val_interactions)
-
+    # ---------- 5-6. Stream DeepMF & CBF (cache OPSIONAL) ----------
+    # Stream DeepMF/CBF IDENTIK untuk semua varian AGF pada (domain, seed,
+    # stage, config DeepMF/CBF) yang sama -- keduanya di-fit SEBELUM tahap
+    # fusion dan tidak bergantung konfigurasi AGF apa pun, padahal justru
+    # keduanya yang mahal (DeepMF OOF melatih 5 model dari nol; CBF LOO
+    # merekonstruksi profil item per baris). Cache OPT-IN (--stream-cache)
+    # memangkas biaya besar saat menjalankan banyak varian. Kunci mencakup
+    # SEMUA yang mempengaruhi stream + validasi jumlah baris saat muat,
+    # jadi cache yang salah tidak mungkin terpakai diam-diam (detail &
+    # pengaman lengkap: src/a2fusionrs/stream_cache.py).
     rating_scale = (1.0, 5.0)
-    deepmf_scalar = {}
-    deepmf_latent = {}
-    # Train: OOF (hindari leakage in-sample -- model full-trained TIDAK
-    # boleh diprediksi ulang pada baris yg dipakai melatihnya sendiri).
-    torch.manual_seed(exp_cfg["seed"])
-    deepmf_scalar["train"], deepmf_latent["train"] = compute_oof_predictions_with_latent(
-        train_df, val_interactions, user2idx, item2idx, len(all_items), deepmf_config,
-        rating_scale=rating_scale, seed=exp_cfg["seed"],
-    )
-    # Val/test: genuinely out-of-sample thd model full-trained, predict_with_
-    # latent() biasa sudah benar (sama pola predict() di run_baseline*.py).
-    for name, part_df in [("val", val_df), ("test", test_df)]:
-        scalar, latent = deepmf_trainer.predict_with_latent(part_df, user2idx, item2idx, rating_scale)
-        deepmf_scalar[name] = scalar
-        deepmf_latent[name] = latent
+    n_rows = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
+    cache_key, cache_payload, cached_streams = None, None, None
+    cache_dir = Path(config["logging"]["checkpoint_dir"]) / "agf_streams"
+    if stream_cache:
+        try:
+            cache_key, cache_payload = build_cache_key(
+                config, exp_cfg["domain"], exp_cfg["seed"], stage, dev_fraction, n_rows
+            )
+            cached_streams = load_streams(cache_dir, cache_key, n_rows)
+        except StreamCacheUnsafeError as exc:
+            logger.warning("Cache stream DINONAKTIFKAN untuk run ini: %s", exc)
+            cache_key = None
 
-    log_stream_diagnostics("deepmf_scalar_train", deepmf_scalar["train"])
-    log_stream_diagnostics("deepmf_scalar_test", deepmf_scalar["test"])
+    if cached_streams is not None:
+        deepmf_scalar = cached_streams["deepmf_scalar"]
+        deepmf_latent = cached_streams["deepmf_latent"]
+        cbf_scalar = cached_streams["cbf_scalar"]
+        cbf_features = cached_streams["cbf_features"]
+        logger.info(
+            "=== Tahap 5-6 DILEWATI: stream DeepMF/CBF dimuat dari cache "
+            "(hemat DeepMF OOF 5-fold + CBF LOO). ==="
+        )
+        log_stream_diagnostics("deepmf_scalar_train", deepmf_scalar["train"])
+        log_stream_diagnostics("deepmf_scalar_test", deepmf_scalar["test"])
+        log_stream_diagnostics("cbf_scalar_train", cbf_scalar["train"])
+        log_stream_diagnostics("cbf_scalar_test", cbf_scalar["test"])
+    else:
+        # ---------- 5. DeepMF (predict_with_latent + OOF utk train) ----------
+        logger.info("=== Tahap 5: Training DeepMF ===")
+        all_users = pd.concat([train_df["user_id"], val_df["user_id"], test_df["user_id"]]).unique()
+        all_items = pd.concat(
+            [train_df["business_id"], val_df["business_id"], test_df["business_id"]]
+        ).unique()
+        user2idx = {u: i for i, u in enumerate(all_users)}
+        item2idx = {b: i for i, b in enumerate(all_items)}
 
-    # ---------- 6. CBF (predict_vector_features + LOO utk train) ----------
-    logger.info("=== Tahap 6: Content-Based Filtering & Clustering ===")
-    full_df_for_items = pd.concat([train_df, val_df, test_df], ignore_index=True)
-    cbf_config = CBFConfig(
-        method=config["cbf_clustering"]["method"],
-        k_min=2,
-        k_max=20,
-        pca_components=config["cbf_clustering"].get("pca_components", 50),
-        random_state=exp_cfg["seed"],
-        include_sentiment=config["cbf_clustering"].get("include_sentiment", False),
-    )
-    cbf_predictor = CBFPredictor(cbf_config=cbf_config)
-    cbf_predictor.fit(full_df_for_items, train_df)
-    logger.info(
-        "CBF clustering selesai: K optimal=%d (metode=%s)", cbf_predictor.clusterer.best_k, cbf_config.method
-    )
+        deepmf_config = DeepMFConfig(
+            embedding_dim=config["deepmf"]["embedding_dim"],
+            hidden_layers=tuple(config["deepmf"]["hidden_layers"]),
+            dropout=config["deepmf"]["dropout"],
+            batch_size=config["deepmf"]["batch_size"],
+            learning_rate=config["deepmf"]["learning_rate"],
+            epochs=config["deepmf"].get("epochs", 20),
+            negative_sampling_ratio=config["deepmf"]["negative_sampling_ratio"],
+            optimizer=config["deepmf"].get("optimizer", "adamw"),
+            weight_decay=config["deepmf"].get("weight_decay", 0.0),
+        )
+        train_interactions = InteractionDataset(
+            train_df, user2idx, item2idx, len(all_items), deepmf_config.negative_sampling_ratio, seed=exp_cfg["seed"]
+        )
+        val_interactions = InteractionDataset(
+            val_df, user2idx, item2idx, len(all_items), negative_ratio=0, seed=exp_cfg["seed"]
+        )
+        torch.manual_seed(exp_cfg["seed"])
+        deepmf_trainer = DeepMFTrainer(len(all_users), len(all_items), deepmf_config)
+        deepmf_trainer.fit(train_interactions, val_interactions)
 
-    cbf_scalar = {}
-    cbf_features = {}
-    # Train: koreksi LOO (item profile tidak boleh "melihat" review baris
-    # yang sedang diberi skor -- lihat predict_train_loo() docstring).
-    cbf_scalar["train"] = cbf_predictor.predict_train_loo(train_df, rating_scale)
-    cbf_features["train"] = cbf_predictor.predict_vector_features_train_loo(train_df)
-    for name, part_df in [("val", val_df), ("test", test_df)]:
-        cbf_scalar[name] = cbf_predictor.predict(part_df, rating_scale)
-        cbf_features[name] = cbf_predictor.predict_vector_features(part_df)
+        # (rating_scale sudah didefinisikan di atas, sebelum blok cache)
+        deepmf_scalar = {}
+        deepmf_latent = {}
+        # Train: OOF (hindari leakage in-sample -- model full-trained TIDAK
+        # boleh diprediksi ulang pada baris yg dipakai melatihnya sendiri).
+        torch.manual_seed(exp_cfg["seed"])
+        deepmf_scalar["train"], deepmf_latent["train"] = compute_oof_predictions_with_latent(
+            train_df, val_interactions, user2idx, item2idx, len(all_items), deepmf_config,
+            rating_scale=rating_scale, seed=exp_cfg["seed"],
+        )
+        # Val/test: genuinely out-of-sample thd model full-trained, predict_with_
+        # latent() biasa sudah benar (sama pola predict() di run_baseline*.py).
+        for name, part_df in [("val", val_df), ("test", test_df)]:
+            scalar, latent = deepmf_trainer.predict_with_latent(part_df, user2idx, item2idx, rating_scale)
+            deepmf_scalar[name] = scalar
+            deepmf_latent[name] = latent
 
-    log_stream_diagnostics("cbf_scalar_train", cbf_scalar["train"])
-    log_stream_diagnostics("cbf_scalar_test", cbf_scalar["test"])
+        log_stream_diagnostics("deepmf_scalar_train", deepmf_scalar["train"])
+        log_stream_diagnostics("deepmf_scalar_test", deepmf_scalar["test"])
+
+        # ---------- 6. CBF (predict_vector_features + LOO utk train) ----------
+        logger.info("=== Tahap 6: Content-Based Filtering & Clustering ===")
+        full_df_for_items = pd.concat([train_df, val_df, test_df], ignore_index=True)
+        cbf_config = CBFConfig(
+            method=config["cbf_clustering"]["method"],
+            k_min=2,
+            k_max=20,
+            pca_components=config["cbf_clustering"].get("pca_components", 50),
+            random_state=exp_cfg["seed"],
+            include_sentiment=config["cbf_clustering"].get("include_sentiment", False),
+        )
+        cbf_predictor = CBFPredictor(cbf_config=cbf_config)
+        cbf_predictor.fit(full_df_for_items, train_df)
+        logger.info(
+            "CBF clustering selesai: K optimal=%d (metode=%s)", cbf_predictor.clusterer.best_k, cbf_config.method
+        )
+
+        cbf_scalar = {}
+        cbf_features = {}
+        # Train: koreksi LOO (item profile tidak boleh "melihat" review baris
+        # yang sedang diberi skor -- lihat predict_train_loo() docstring).
+        cbf_scalar["train"] = cbf_predictor.predict_train_loo(train_df, rating_scale)
+        cbf_features["train"] = cbf_predictor.predict_vector_features_train_loo(train_df)
+        for name, part_df in [("val", val_df), ("test", test_df)]:
+            cbf_scalar[name] = cbf_predictor.predict(part_df, rating_scale)
+            cbf_features[name] = cbf_predictor.predict_vector_features(part_df)
+
+        log_stream_diagnostics("cbf_scalar_train", cbf_scalar["train"])
+        log_stream_diagnostics("cbf_scalar_test", cbf_scalar["test"])
+
+        if stream_cache and cache_key is not None:
+            save_streams(
+                cache_dir, cache_key, cache_payload,
+                {
+                    "deepmf_scalar": deepmf_scalar, "deepmf_latent": deepmf_latent,
+                    "cbf_scalar": cbf_scalar, "cbf_features": cbf_features,
+                },
+            )
 
     # ---------- 7. Fusion (DIGANTI sesuai skenario) ----------
     logger.info("=== Tahap 7: Fusion (skenario '%s') ===", scenario)
@@ -1012,6 +1066,17 @@ def run_pipeline(
             aspect_vocab_size=(len(aspect_vocab) if aspect_vocab is not None else 0),
             aspect_emb_dim=config.get("agf", {}).get("aspect_emb_dim", 16),
         )
+        # RESEED WAJIB sebelum membangun AGF (pola sama dgn Temuan B1 Fase 1,
+        # lihat reseed sebelum DeepMFTrainer/compute_oof di Tahap 5): tanpa
+        # ini, bobot AWAL AGF bergantung pada BERAPA BANYAK angka acak yang
+        # kebetulan dikonsumsi tahap-tahap sebelumnya. Akibatnya run dgn
+        # stream dari cache (DeepMF tidak dilatih -> RNG tidak terkonsumsi)
+        # menghasilkan angka BERBEDA dari run yang menghitung stream dari
+        # nol, padahal stream-nya identik bit-per-bit. Ditemukan oleh
+        # gerbang verifikasi bit-identical cache (Tahap 4); reseed ini
+        # membuat hasil bergantung HANYA pada seed, bukan pada riwayat
+        # eksekusi.
+        torch.manual_seed(exp_cfg["seed"])
         agf_trainer = AttentionGatedFusionTrainer(modality_dims, agf_cfg)
         train_time = agf_trainer.fit(
             build_features("train"), train_y_norm, build_features("val"), val_y_norm,
@@ -1205,6 +1270,13 @@ if __name__ == "__main__":
         "dari 'results/' yang memuat hasil A2-IRM & triage lama, supaya tidak mungkin tertimpa. "
         "Hasil dipisah lagi per stage: <subdir>/dev/ dan <subdir>/test/.",
     )
+    parser.add_argument(
+        "--stream-cache", action="store_true",
+        help="Simpan/muat stream DeepMF & CBF ke checkpoints/{domain}/agf_streams/. Stream identik "
+        "utk semua varian AGF pada (domain, seed, stage, config DeepMF/CBF) yang sama, jadi ini "
+        "memangkas biaya besar saat menjalankan banyak varian (DeepMF OOF 5-fold + CBF LOO tidak "
+        "dihitung ulang). OPT-IN (default MATI) supaya tidak ada risiko diam-diam memakai cache basi.",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config)
@@ -1224,4 +1296,5 @@ if __name__ == "__main__":
         stage=args.stage,
         dev_fraction=args.dev_fraction,
         results_subdir=args.results_subdir,
+        stream_cache=args.stream_cache,
     )
