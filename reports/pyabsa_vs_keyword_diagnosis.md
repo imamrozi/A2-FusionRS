@@ -1,5 +1,36 @@
 # Mengapa PyABSA kalah dari keyword-ABSA? — diagnosis kanal sentimen
 
+> ## ⚠ KOREKSI (2026-08-08) — baca sebelum mengutip dokumen ini
+>
+> Bagian §3.3 di bawah menyimpulkan **"H-struktur tertolak"**. Kesimpulan itu
+> **terlalu luas** dan dikoreksi oleh gerbang lanjutan
+> (`reports/gate_pyabsaext_sabert.csv`, skrip
+> `scripts/gate_pyabsa_extraction_sabert_scoring.py`).
+>
+> **Yang tetap berlaku:** struktur bukan penyebab gap PyABSA-vs-keyword, dan
+> clustering **atas skor PyABSA** memang tidak menolong. Seluruh bukti di §3
+> diukur di atas skor PyABSA yang tidak tersupervisi, dan di rezim itu
+> memulihkan struktur memang sia-sia — sinyal dasarnya sudah rusak.
+>
+> **Yang dikoreksi:** itu **tidak** berarti struktur tak penting secara umum.
+> Ketika scorer disetarakan (skor SA-BERT tersupervisi di kedua cabang),
+> struktur posisi-tetap justru bernilai **besar**:
+>
+> | Domain | keyword_concat_conf (berstruktur) | keyword_rich9 (struktur dibuang) | nilai struktur |
+> |---|---|---|---|
+> | Restaurant | 0,7468 | 0,8408 | **11,2%** |
+> | E-commerce | 0,7164 | 0,8107 | **11,6%** |
+> | Hotel | 0,6828 | 0,7239 | **5,7%** |
+>
+> **Rumusan yang benar:** dengan skor buruk, struktur tidak bisa menolong;
+> dengan skor bagus, struktur krusial. Kedua faktor nyata — keduanya harus
+> dibereskan, bukan salah satu.
+>
+> Konsekuensi praktis: pertanyaan "apakah clustering menolong?" **harus diuji
+> ulang di bawah scorer yang adil**; jawaban "tidak" di §3.2 hanya sah untuk
+> rezim skor PyABSA.
+
+
 **Tanggal:** 2026-08-07
 **Pemicu:** hasil faktorial Tahap 7 (60 run, TEST SET) menunjukkan penggantian
 keyword-ABSA → PyABSA MERUGIKAN di 3/3 domain.
@@ -80,7 +111,12 @@ Hasilnya **lebih buruk daripada agregasi rich9 biasa di 3/3 domain**
 (0,9763 vs 0,7931 · 1,0831 vs 0,8916 · 0,8030 vs 0,6953), dan jauh di bawah
 keyword. Memulihkan struktur posisi-tetap **tidak** memulihkan performa.
 
-### 3.3 Mengapa H-struktur tertolak
+### 3.3 Mengapa H-struktur tertolak *dalam rezim skor PyABSA*
+
+> Lihat KOREKSI di kepala dokumen: judul asli bagian ini ("Mengapa H-struktur
+> tertolak") berlaku **hanya** untuk representasi yang dibangun di atas skor
+> PyABSA tak-tersupervisi. Di bawah skor SA-BERT, struktur bernilai 5,7–11,6%.
+
 
 - Baris 2 < baris 3 di 2/3 domain: **satu skalar** tersupervisi mengalahkan
   **sembilan dimensi** PyABSA → defisit bukan soal dimensi atau struktur.

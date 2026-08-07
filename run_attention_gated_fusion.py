@@ -712,6 +712,7 @@ def run_pipeline(
     rating_scale = (1.0, 5.0)
     n_rows = {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
     cache_key, cache_payload, cached_streams = None, None, None
+    stream_cache_status = "disabled"
     cache_dir = Path(config["logging"]["checkpoint_dir"]) / "agf_streams"
     if stream_cache:
         try:
@@ -719,9 +720,11 @@ def run_pipeline(
                 config, exp_cfg["domain"], exp_cfg["seed"], stage, dev_fraction, n_rows
             )
             cached_streams = load_streams(cache_dir, cache_key, n_rows)
+            stream_cache_status = "hit" if cached_streams is not None else "miss"
         except StreamCacheUnsafeError as exc:
             logger.warning("Cache stream DINONAKTIFKAN untuk run ini: %s", exc)
             cache_key = None
+            stream_cache_status = "unsafe"
 
     if cached_streams is not None:
         deepmf_scalar = cached_streams["deepmf_scalar"]
@@ -1217,6 +1220,14 @@ def run_pipeline(
         "train_time_seconds": train_time,
         "predict_time_seconds": predict_time,
         "n_parameters": n_params,
+        # Status stream-cache: WAJIB dicatat supaya analisis waktu bisa
+        # difilter & pembaca tahu waktu mana yang mencakup pembangunan
+        # stream DeepMF OOF + CBF LOO (biaya dominan) dan mana yang tidak.
+        # "disabled"  = --stream-cache tidak dipakai
+        # "unsafe"    = diminta tapi ditolak pengaman (kunci tak terpercaya)
+        # "hit"       = stream dimuat dari cache (Tahap 5-6 dilewati)
+        # "miss"      = stream dihitung dari nol lalu disimpan
+        "stream_cache_status": stream_cache_status,
         "input_standardize": input_standardize,
         "use_scalar_preds": use_scalar_preds,
         "representation": representation,

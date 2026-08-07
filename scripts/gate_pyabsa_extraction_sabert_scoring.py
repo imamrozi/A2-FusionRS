@@ -255,6 +255,7 @@ def run_domain(domain: str, cfg: dict, fast: bool = True) -> list[dict]:
 
     flat_texts: list[str] = []
     flat_rid: list[int] = []
+    flat_terms: list[str] = []
     fallback_texts: dict[int, str] = {}
 
     for row in sample.itertuples(index=False):
@@ -270,6 +271,7 @@ def run_domain(domain: str, cfg: dict, fast: bool = True) -> list[dict]:
             if hits:
                 flat_texts.append(" ".join(hits))
                 flat_rid.append(row.review_id)
+                flat_terms.append(t)
                 matched_any = True
         if not matched_any:
             fallback_texts[row.review_id] = text_bert
@@ -288,6 +290,7 @@ def run_domain(domain: str, cfg: dict, fast: bool = True) -> list[dict]:
     score = predict_proba_dynamic if fast else sa.predict_proba
 
     per_review: dict[int, list[float]] = {}
+    probs = np.empty(0, dtype=np.float32)
     if flat_texts:
         probs = score(sa, flat_texts) if fast else score(flat_texts)
         for rid, p in zip(flat_rid, probs):
@@ -299,6 +302,19 @@ def run_domain(domain: str, cfg: dict, fast: bool = True) -> list[dict]:
         fb_texts = [fallback_texts[r] for r in rids]
         fb_probs = score(sa, fb_texts) if fast else score(fb_texts)
         sabert_fallback = {r: float(p) for r, p in zip(rids, fb_probs)}
+
+    # CACHE: pass BERT di atas memakan ~40 menit/domain di CPU. Simpan skor
+    # per-(review, istilah aspek) supaya analisis representasi lanjutan
+    # (clustering, bag-of-aspects, dsb) TIDAK perlu mengulang inference.
+    cache_path = pdir / "sabert_aspect_scores_gatesample.csv"
+    pd.DataFrame(
+        {"review_id": flat_rid, "aspect_term": flat_terms,
+         "sabert_score": np.asarray(probs, dtype=np.float32)}
+    ).to_csv(cache_path, index=False)
+    pd.DataFrame(
+        {"review_id": list(sabert_fallback), "fallback_score": list(sabert_fallback.values())}
+    ).to_csv(pdir / "sabert_fallback_gatesample.csv", index=False)
+    logger.info("Cache skor per-aspek SA-BERT disimpan: %s (%d baris)", cache_path, len(flat_rid))
 
     # ---- Rakit representasi (semua pada subsample yang sama) ----
     ids = sample["review_id"].tolist()
@@ -323,6 +339,53 @@ def run_domain(domain: str, cfg: dict, fast: bool = True) -> list[dict]:
     )
     old_rich.insert(0, "review_id", scored["review_id"].values)
 
+    # ---- PEMULIHAN STRUKTUR di bawah scorer yang ADIL ----
+    # Gerbang menunjukkan sisa gap ke keyword_concat_conf adalah gap STRUKTUR
+    # (keyword berstruktur unggul 5,7-11,6% atas keyword_rich9). Pertanyaan
+    # penentunya: bisakah aspek open-vocabulary memulihkan struktur itu?
+    # Diagnosis sebelumnya menjawab "tidak", TAPI itu diukur di atas skor
+    # PyABSA yang tak tersupervisi -- di bawah skor SA-BERT jawabannya bisa
+    # berbeda, jadi diuji ulang di sini.
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from diagnose_sentiment_signal_quality import _cluster_aspect_terms  # noqa: E402
+
+    term_scores: dict[int, list[tuple[str, float]]] = {}
+    for rid, term, p in zip(flat_rid, flat_terms, probs):
+        term_scores.setdefault(rid, []).append((term, float(p)))
+
+    train_ids = set(train["review_id"])
+    counter: dict[str, int] = {}
+    for rid, pairs in term_scores.items():
+        if rid in train_ids:
+            for term, _ in pairs:
+                counter[term] = counter.get(term, 0) + 1
+    vocab = [t for t, _ in sorted(counter.items(), key=lambda kv: -kv[1])[:200]]
+
+    n_kw = (len(kw.columns) - 1) // 2
+    term2cluster = _cluster_aspect_terms(scored, train_ids, vocab, n_kw)
+
+    clu = np.zeros((len(ids), 2 * n_kw), dtype=np.float32)
+    bag = np.zeros((len(ids), 2 * len(vocab)), dtype=np.float32)
+    vidx = {t: i for i, t in enumerate(vocab)}
+    for r, rid in enumerate(ids):
+        acc: dict[int, list[float]] = {}
+        for term, s in term_scores.get(rid, []):
+            c = term2cluster.get(term)
+            if c is not None:
+                acc.setdefault(c, []).append(s)
+            j = vidx.get(term)
+            if j is not None:
+                bag[r, j] = s
+                bag[r, len(vocab) + j] = 1.0
+        for c, vals in acc.items():
+            clu[r, c] = float(np.mean(vals))
+            clu[r, n_kw + c] = 1.0
+
+    clustered = pd.DataFrame(clu, columns=[f"clu_{i}" for i in range(2 * n_kw)])
+    clustered.insert(0, "review_id", ids)
+    bag_df = pd.DataFrame(bag, columns=[f"bag_{i}" for i in range(2 * len(vocab))])
+    bag_df.insert(0, "review_id", ids)
+
     reps = {
         "keyword_concat_conf (A2-IRM)": kw,
         "keyword_rich9 (KONTROL like-for-like)": _keyword_rich(kw),
@@ -330,6 +393,8 @@ def run_domain(domain: str, cfg: dict, fast: bool = True) -> list[dict]:
         "pyabsa_rich9 (sel C/D0 lama)": old_rich,
         "USULAN pyabsaext_sabert_mean1": new_mean,
         "USULAN pyabsaext_sabert_rich9": new_rich,
+        "STRUKTUR pyabsaext_sabert_clustered": clustered,
+        "STRUKTUR pyabsaext_sabert_bag200": bag_df,
     }
 
     rows = []
