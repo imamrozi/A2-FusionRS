@@ -1,0 +1,19 @@
+domain,representation,n_train,n_test,rmse,pearson_r,n_features
+Restaurant,"1. keyword_concat_conf (A2-IRM, SA-BERT tersupervisi)",95181,13233,0.7416130259036189,0.7656094683268846,8
+Restaurant,2. sabert_global_1dim (satu skalar tersupervisi),95181,13233,0.7491900453049362,0.7601569789268315,1
+Restaurant,"2b. pyabsa_meanpos_1dim (satu skalar, TANPA supervisi)",95181,13233,0.8228105331838278,0.7008911680406007,1
+Restaurant,3. pyabsa_rich9 (sel C & D0),95181,13233,0.7931476205667723,0.7261911302715099,9
+Restaurant,"3b. pyabsa_clustered (taksonomi terinduksi, K=|keyword|)",95181,13233,0.9762843641970285,0.5309245809213967,8
+Restaurant,4. pyabsa_bag_top200 (BATAS ATAS clustering),95181,13233,0.9720469278328648,0.5363787115544932,400
+E-commerce,"1. keyword_concat_conf (A2-IRM, SA-BERT tersupervisi)",98400,16580,0.7070637617236615,0.8129634228353151,10
+E-commerce,2. sabert_global_1dim (satu skalar tersupervisi),98400,16580,0.7111749356543741,0.8104596703033646,1
+E-commerce,"2b. pyabsa_meanpos_1dim (satu skalar, TANPA supervisi)",98400,16580,0.97953272831342,0.5940754042870545,1
+E-commerce,3. pyabsa_rich9 (sel C & D0),98400,16580,0.8915744802141756,0.6812181463731215,9
+E-commerce,"3b. pyabsa_clustered (taksonomi terinduksi, K=|keyword|)",98400,16580,1.0831176379652996,0.4576773242957299,10
+E-commerce,4. pyabsa_bag_top200 (BATAS ATAS clustering),98400,16580,1.0765831776614072,0.46446185895261033,400
+Hotel,"1. keyword_concat_conf (A2-IRM, SA-BERT tersupervisi)",64280,11795,0.6855510242329235,0.6646246307819164,12
+Hotel,2. sabert_global_1dim (satu skalar tersupervisi),64280,11795,0.712836897284034,0.6328123375414919,1
+Hotel,"2b. pyabsa_meanpos_1dim (satu skalar, TANPA supervisi)",64280,11795,0.717837519701908,0.6236265126385142,1
+Hotel,3. pyabsa_rich9 (sel C & D0),64280,11795,0.6952715516384779,0.6548799065089624,9
+Hotel,"3b. pyabsa_clustered (taksonomi terinduksi, K=|keyword|)",64280,11795,0.803038478186107,0.48173368036059744,12
+Hotel,4. pyabsa_bag_top200 (BATAS ATAS clustering),64280,11795,0.7984956146653066,0.4912453842998467,400
