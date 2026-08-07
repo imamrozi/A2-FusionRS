@@ -141,6 +141,21 @@ AGF_SCENARIOS: dict[str, dict] = {
     "leave_out_cbf": dict(modalities=["deepmf", "absa"], use_attention=True, pooling="gate"),
     "leave_out_absa": dict(modalities=["deepmf", "cbf"], use_attention=True, pooling="gate"),
     "concat_mlp": dict(modalities=["deepmf", "cbf", "absa"], use_attention=False, pooling="concat"),
+    # ---- A2-FusionRS "clean" (arsitektur target Fase 2) ----
+    # DeepMF + CBF + PyABSA (SATU-SATUNYA sumber sentimen) -> AGF.
+    # `skip_absa=True` => stream 'absa' berbasis keyword TIDAK dipakai sama
+    # sekali (modalitas 'absa' tidak ada di daftar, _compute_absa_features()
+    # tidak dipanggil). Sentimen HANYA masuk lewat --extra-pyabsa
+    # (perseq/perseq_rich), yaitu token dari AspectSequencePooling (+ opsional
+    # token ringkasan level-review dari cache PyABSA yang SAMA).
+    #
+    # Kenapa skenario terpisah, bukan pakai "leave_out_absa" yg secara teknis
+    # setara: namanya menyesatkan utk manuskrip (seolah TANPA ABSA, padahal
+    # justru ABSA-nya PyABSA per-aspek) dan `skip_absa` mengunci larangan
+    # keyword-ABSA + NMF/DT secara struktural lewat guard di run_pipeline().
+    "a2fusionrs_clean": dict(
+        modalities=["deepmf", "cbf"], use_attention=True, pooling="gate", skip_absa=True
+    ),
 }
 # static_keyword_pyabsa: KONTROL ATRIBUSI -- tree NMF+DT (sama spt A2-IRM)
 # TAPI diberi keyword ABSA + PyABSA-rich sekaligus. Menjawab "apakah tree
@@ -179,8 +194,23 @@ def _compute_absa_features(
             "jalankan run_baseline.py (config domain yang sama, logging."
             "checkpoint_dir yang sama) sampai tahap 4 selesai terlebih dahulu."
         )
-    logger.info("Memuat model SA dari checkpoint %s (dipakai ulang, tanpa training baru).", sa_checkpoint_dir)
-    sa_model = GlobalSentimentBERT.load(str(sa_checkpoint_dir), sa_config)
+
+    # LAZY-LOAD (2026-08-07): model SA dulu dimuat TANPA SYARAT di sini,
+    # padahal pada jalur yang cache-nya sudah lengkap (keyword: cache
+    # absa_concat_confidence_scores.csv; pyabsa: cache sa_fallback_scores_*)
+    # model itu tidak pernah dipakai sama sekali -- membuang ~1-2 menit
+    # load BERT tiap run, dikali puluhan run. Sekarang baru dimuat saat
+    # benar-benar ada teks yang perlu di-infer.
+    _sa_model_holder: list = []
+
+    def get_sa_model() -> GlobalSentimentBERT:
+        if not _sa_model_holder:
+            logger.info(
+                "Memuat model SA dari checkpoint %s (dipakai ulang, tanpa training baru).",
+                sa_checkpoint_dir,
+            )
+            _sa_model_holder.append(GlobalSentimentBERT.load(str(sa_checkpoint_dir), sa_config))
+        return _sa_model_holder[0]
 
     splits = {"train": train_df, "val": val_df, "test": test_df}
 
@@ -188,8 +218,9 @@ def _compute_absa_features(
         # Reuse PERSIS varian terbaik Fase 1 (Concat+Confidence) sbg
         # representasi ABSA keyword -- sel faktorial "AGF + Keyword".
         absa_config = ABSAConfig(domain=exp_cfg["domain"])
-        scorer = KeywordAspectSentimentScorer(sa_model, absa_config)
-        aspect_names = list(scorer.aspect_keywords.keys())
+        # Nama aspek diambil dari config (TIDAK butuh model SA) supaya jalur
+        # cache-hit tidak memuat BERT sama sekali -- lihat get_sa_model().
+        aspect_names = list(absa_config.resolved_keywords().keys())
         confidence_names = [f"{a}_confidence" for a in aspect_names]
 
         absa_cache = sa_checkpoint_dir / "absa_concat_confidence_scores.csv"
@@ -200,6 +231,7 @@ def _compute_absa_features(
                 for col in aspect_names + confidence_names:
                     part_df[col] = part_df["review_id"].map(cache_df[col])
         else:
+            scorer = KeywordAspectSentimentScorer(get_sa_model(), absa_config)
             for name, part_df in splits.items():
                 logger.info("=== ABSA-keyword: menghitung skor per-aspek split '%s' ===", name)
                 t0 = time.time()
@@ -286,7 +318,9 @@ def _compute_absa_features(
                     len(uncached_rows),
                 )
                 if len(uncached_rows) > 0:
-                    new_preds = sa_model.predict_proba(uncached_rows["text_bert"].fillna("").tolist())
+                    new_preds = get_sa_model().predict_proba(
+                        uncached_rows["text_bert"].fillna("").tolist()
+                    )
                     fallback_cache.update(dict(zip(uncached_rows["review_id"], (float(p) for p in new_preds))))
 
             fallback_scores = {rid: fallback_cache[rid] for rid in zero_aspect_rows["review_id"] if rid in fallback_cache}
@@ -526,12 +560,32 @@ def run_pipeline(
         raise ValueError(
             f"residual_base '{residual_base}' -- pakai 'none'/'static_fusion'/'static_fusion_oof'."
         )
-    if extra_pyabsa not in ("none", "rich", "summary", "perseq"):
-        raise ValueError(f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'/'perseq'.")
+    if extra_pyabsa not in ("none", "rich", "summary", "perseq", "perseq_rich"):
+        raise ValueError(
+            f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'/'perseq'/'perseq_rich'."
+        )
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
     if stage not in ("select", "confirm"):
         raise ValueError(f"stage '{stage}' -- pakai 'select' (evaluasi di dev) atau 'confirm' (di test).")
+
+    # ---- Guard arsitektur "clean" (dikunci struktural, bukan konvensi) ----
+    skip_absa = AGF_SCENARIOS.get(scenario, {}).get("skip_absa", False)
+    if skip_absa:
+        if residual_base in ("static_fusion", "static_fusion_oof"):
+            raise ValueError(
+                f"scenario '{scenario}' adalah arsitektur BERSIH (PyABSA + AGF) yang secara "
+                f"eksplisit MENGGANTIKAN fusi statis NMF+DecisionTree -- memakainya sebagai "
+                f"residual base ('{residual_base}') kontradiktif secara arsitektural. "
+                "Pakai --residual-base none atau user_item_bias."
+            )
+        if extra_pyabsa not in ("perseq", "perseq_rich"):
+            raise ValueError(
+                f"scenario '{scenario}' tidak memakai stream ABSA keyword sama sekali, jadi "
+                f"sentimen HARUS masuk lewat PyABSA per-aspek: --extra-pyabsa perseq atau "
+                f"perseq_rich (diberikan: '{extra_pyabsa}'). Tanpa itu model tidak punya "
+                "sinyal sentimen apa pun."
+            )
 
     exp_cfg = config["experiment"]
     split_cfg = config["split"]
@@ -579,16 +633,31 @@ def run_pipeline(
     # ---------- 4. ABSA (sumber fitur modalitas 'absa') ----------
     logger.info("=== Tahap 4: Skor ABSA (sumber modalitas 'absa') ===")
     sa_checkpoint_dir = Path(config["logging"]["checkpoint_dir"]) / "sentiment_bert"
-    default_absa_source = config.get("agf", {}).get("absa_source", "pyabsa")
-    absa_source = AGF_SCENARIOS.get(scenario, {}).get("absa_source_override", default_absa_source)
-    if scenario == "static_keyword_pyabsa":
-        absa_source = "keyword"  # kontrol pakai keyword ABSA (spt A2-IRM) + PyABSA-rich di tree
-    logger.info("Sumber ABSA untuk skenario '%s': '%s'", scenario, absa_source)
+    if skip_absa:
+        # Arsitektur BERSIH: stream 'absa' keyword TIDAK ADA. _compute_absa_
+        # features() DILEWATI seluruhnya -> GlobalSentimentBERT tidak dimuat
+        # (hemat ~1-2 menit/run) dan kolom `sentiment_score` tidak pernah
+        # dibuat (memang tak terpakai: CBFConfig.include_sentiment=False di
+        # semua config AGF). Sentimen masuk HANYA lewat PyABSA per-aspek di
+        # Tahap 7 (--extra-pyabsa perseq/perseq_rich), dari cache yang sudah
+        # ada -- tanpa inferensi model apa pun.
+        absa_source = f"pyabsa_{extra_pyabsa}"
+        absa_features = {}
+        logger.info(
+            "Skenario '%s': stream ABSA keyword DILEWATI sepenuhnya (skip_absa). "
+            "Sumber sentimen TUNGGAL = PyABSA '%s'.", scenario, extra_pyabsa,
+        )
+    else:
+        default_absa_source = config.get("agf", {}).get("absa_source", "pyabsa")
+        absa_source = AGF_SCENARIOS.get(scenario, {}).get("absa_source_override", default_absa_source)
+        if scenario == "static_keyword_pyabsa":
+            absa_source = "keyword"  # kontrol pakai keyword ABSA (spt A2-IRM) + PyABSA-rich di tree
+        logger.info("Sumber ABSA untuk skenario '%s': '%s'", scenario, absa_source)
 
-    absa_result = _compute_absa_features(
-        config, exp_cfg, train_df, val_df, test_df, sa_checkpoint_dir, absa_source
-    )
-    absa_features = absa_result["features"]
+        absa_result = _compute_absa_features(
+            config, exp_cfg, train_df, val_df, test_df, sa_checkpoint_dir, absa_source
+        )
+        absa_features = absa_result["features"]
 
     # ---------- 5. DeepMF (predict_with_latent + OOF utk train) ----------
     logger.info("=== Tahap 5: Training DeepMF ===")
@@ -767,8 +836,8 @@ def run_pipeline(
 
         aspect_seq = None
         aspect_vocab = None
+        splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
         if extra_pyabsa in ("rich", "summary"):
-            splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
             pyabsa_extra = _compute_pyabsa_rich_modality(
                 config, exp_cfg, splits_for_pyabsa, rich=(extra_pyabsa == "rich")
             )
@@ -776,10 +845,32 @@ def run_pipeline(
             if "pyabsa" not in modalities:
                 modalities = modalities + ["pyabsa"]
         elif extra_pyabsa == "perseq":
-            splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
             aspect_vocab, aspect_seq = _compute_pyabsa_aspect_sequences(
                 config, exp_cfg, splits_for_pyabsa
             )
+        elif extra_pyabsa == "perseq_rich":
+            # DUA view dari SATU pass skoring PyABSA yang sama (cache identik,
+            # TIDAK ada inferensi kedua): (1) sequence per-aspek -> token via
+            # AspectSequencePooling, mempertahankan IDENTITAS & kontras
+            # polaritas antar-aspek; (2) ringkasan level-review 9-dim
+            # (order-statistics: min/max/range positive prob, fraksi aspek
+            # positif/negatif) -> token terpisah.
+            #
+            # Ini BUKAN "ABSA 2x": satu model (PyABSA), satu inferensi, dua
+            # representasi komplementer dari output yang sama -- berbeda dari
+            # keyword+PyABSA yang memang dua SISTEM ABSA berbeda. Keduanya
+            # komplementer krn attention-pooling menghasilkan rata-rata
+            # berbobot, sedangkan order-statistics (mis. "aspek terburuk")
+            # tidak natural direpresentasikan pooling softmax.
+            aspect_vocab, aspect_seq = _compute_pyabsa_aspect_sequences(
+                config, exp_cfg, splits_for_pyabsa
+            )
+            pyabsa_extra = _compute_pyabsa_rich_modality(
+                config, exp_cfg, splits_for_pyabsa, rich=True
+            )
+            all_feature_sources["pyabsa"] = pyabsa_extra
+            if "pyabsa" not in modalities:
+                modalities = modalities + ["pyabsa"]
 
         # RESIDUAL base: base = prediksi NMF+DecisionTree (sama spt A2-IRM)
         # atas [absa, deepmf_scalar, cbf_scalar]; AGF belajar koreksi di
@@ -889,7 +980,7 @@ def run_pipeline(
             use_attention=scenario_cfg["use_attention"],
             pooling=scenario_cfg["pooling"],
             residual=(residual_base != "none"),
-            aspect_pooling=(extra_pyabsa == "perseq"),
+            aspect_pooling=(extra_pyabsa in ("perseq", "perseq_rich")),
             aspect_vocab_size=(len(aspect_vocab) if aspect_vocab is not None else 0),
             aspect_emb_dim=config.get("agf", {}).get("aspect_emb_dim", 16),
         )
@@ -902,7 +993,9 @@ def run_pipeline(
             val_aspect_seq=(aspect_seq["val"] if aspect_seq else None),
         )
         n_params = agf_trainer.n_parameters
-        gate_modalities = modalities + (["pyabsa_aspect"] if extra_pyabsa == "perseq" else [])
+        gate_modalities = modalities + (
+            ["pyabsa_aspect"] if extra_pyabsa in ("perseq", "perseq_rich") else []
+        )
 
         t0 = time.time()
         test_final_preds, gate_weights_test = agf_trainer.predict(
@@ -1050,9 +1143,12 @@ if __name__ == "__main__":
         help="Override agf.weight_decay (L2 Adam) -- utk residual, menekan koreksi ke robust-only.",
     )
     parser.add_argument(
-        "--extra-pyabsa", type=str, default="none", choices=["none", "rich", "summary", "perseq"],
-        help="Tambah sinyal PyABSA per-aspek ke AGF (BUKAN ke base): 'rich'=order-stats kontras, "
-        "'summary'=5-dim rata-rata, 'perseq'=sequence aspek + IDENTITAS via AspectSequencePooling.",
+        "--extra-pyabsa", type=str, default="none",
+        choices=["none", "rich", "summary", "perseq", "perseq_rich"],
+        help="Sinyal PyABSA per-aspek utk AGF (BUKAN ke base): 'rich'=order-stats kontras (9-dim), "
+        "'summary'=5-dim rata-rata, 'perseq'=sequence aspek + IDENTITAS via AspectSequencePooling, "
+        "'perseq_rich'=perseq + ringkasan 9-dim dari SATU pass skoring yang sama (dipakai "
+        "arsitektur bersih a2fusionrs_clean).",
     )
     parser.add_argument(
         "--run-tag", type=str, default="",

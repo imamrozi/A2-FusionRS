@@ -220,6 +220,16 @@ def build_item_dataframe(
     tetap masuk daftar (agar clustering/lookup tidak KeyError), tapi dengan
     description_text kosong dan sentiment_agg/review_count/avg_rating diisi
     nilai rata-rata global train sebagai fallback cold-start.
+
+    KOLOM SENTIMEN OPSIONAL (2026-08-07): `sentiment_agg` hanya dihitung bila
+    kolom `sentiment_col` BENAR-BENAR ADA di train_df. Sejak default proyek
+    berubah jadi `CBFConfig.include_sentiment=False` (arsitektur A2-IRM final:
+    sentimen masuk ke fusion, TIDAK lewat CBF), kolom itu dihitung lalu
+    dibuang tanpa dipakai. Pipeline yang memang tidak punya stream sentimen
+    keyword sama sekali (mis. skenario `a2fusionrs_clean` Fase 2, sentimen
+    murni PyABSA yang tidak pernah menulis kolom `sentiment_score`) karena itu
+    dulu gagal dgn KeyError di sini. Perilaku LAMA tidak berubah: bila kolom
+    ada, hasilnya identik seperti sebelumnya.
     """
     if "categories_list" not in full_df.columns:
         full_df = full_df.copy()
@@ -232,14 +242,24 @@ def build_item_dataframe(
         full_df.drop_duplicates("business_id").set_index("business_id")["categories_list"]
     )
 
-    train_agg = train_df.groupby("business_id").agg(
-        description_text=("text_tfidf", lambda x: " ".join(x)),
-        sentiment_agg=(sentiment_col, "mean"),
-        review_count=("stars", "count"),
-        avg_rating=("stars", "mean"),
-    )
+    has_sentiment = sentiment_col in train_df.columns
+    agg_spec = {
+        "description_text": ("text_tfidf", lambda x: " ".join(x)),
+        "review_count": ("stars", "count"),
+        "avg_rating": ("stars", "mean"),
+    }
+    if has_sentiment:
+        agg_spec["sentiment_agg"] = (sentiment_col, "mean")
+    else:
+        logger.info(
+            "Kolom '%s' tidak ada di train_df -- fitur sentiment_agg DILEWATI "
+            "(wajar utk pipeline tanpa stream sentimen keyword, mis. skenario "
+            "A2-FusionRS 'clean' yang sentimennya murni PyABSA ke fusion).",
+            sentiment_col,
+        )
 
-    global_sentiment_mean = train_df[sentiment_col].mean()
+    train_agg = train_df.groupby("business_id").agg(**agg_spec)
+
     global_avg_rating = train_df["stars"].mean()
 
     item_df = pd.DataFrame({"business_id": all_items})
@@ -255,7 +275,8 @@ def build_item_dataframe(
         )
 
     item_df["description_text"] = item_df["description_text"].fillna("")
-    item_df["sentiment_agg"] = item_df["sentiment_agg"].fillna(global_sentiment_mean)
+    if has_sentiment:
+        item_df["sentiment_agg"] = item_df["sentiment_agg"].fillna(train_df[sentiment_col].mean())
     item_df["review_count"] = item_df["review_count"].fillna(0)
     item_df["avg_rating"] = item_df["avg_rating"].fillna(global_avg_rating)
 
