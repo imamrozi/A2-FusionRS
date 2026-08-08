@@ -20,19 +20,56 @@ from nltk.stem import WordNetLemmatizer
 logger = logging.getLogger(__name__)
 
 
+# (resource, prefix path tempat NLTK menyimpannya). Prefix WAJIB benar:
+# tokenizer ada di "tokenizers/", korpus di "corpora/". Memakai prefix yang
+# salah membuat nltk.data.find() SELALU melempar LookupError, sehingga
+# resource diunduh ulang setiap pemanggilan -- dan yang lebih buruk,
+# menyamarkan resource yang sebenarnya TIDAK terpasang.
+_NLTK_RESOURCES = [
+    ("stopwords", "corpora"),
+    ("wordnet", "corpora"),
+    ("omw-1.4", "corpora"),
+    ("punkt", "tokenizers"),
+    # NLTK >= 3.9 memakai punkt_tab untuk sent_tokenize; 'punkt' saja TIDAK
+    # cukup dan menghasilkan LookupError di runtime (terlihat di Colab
+    # nltk 3.9 saat precompute, sementara environment lama lolos karena
+    # resource-nya sudah tertinggal dari instalasi sebelumnya).
+    ("punkt_tab", "tokenizers"),
+]
+
+
+def _nltk_has(path: str) -> bool:
+    try:
+        nltk.data.find(path)
+        return True
+    except LookupError:
+        return False
+
+
 def ensure_nltk_resources() -> None:
     """Unduh resource NLTK yang diperlukan jika belum ada di environment.
 
     Dipisah jadi fungsi agar bisa dipanggil eksplisit sekali di awal notebook/
     script, daripada silent-download di tengah proses batch besar.
+
+    `punkt_tab` sengaja diperlakukan TOLERAN terhadap kegagalan: ia tidak ada
+    di NLTK lama, sehingga unduhannya wajar gagal di environment ber-NLTK < 3.9
+    yang justru tidak membutuhkannya.
     """
-    resources = ["stopwords", "wordnet", "omw-1.4", "punkt"]
-    for res in resources:
-        try:
-            nltk.data.find(f"corpora/{res}")
-        except LookupError:
-            logger.info("Mengunduh resource NLTK: %s", res)
-            nltk.download(res, quiet=True)
+    for res, prefix in _NLTK_RESOURCES:
+        # Sebagian resource tersimpan sebagai arsip (mis. corpora/wordnet.zip)
+        # dan TIDAK ditemukan lewat nama polosnya, walaupun NLTK bisa
+        # memakainya. Mengecek kedua bentuk mencegah unduh ulang berulang
+        # tiap pemanggilan.
+        if any(_nltk_has(f"{prefix}/{res}{ext}") for ext in ("", ".zip")):
+            continue
+        logger.info("Mengunduh resource NLTK: %s", res)
+        ok = nltk.download(res, quiet=True)
+        if not ok and res != "punkt_tab":
+            logger.warning(
+                "Gagal mengunduh resource NLTK '%s' -- tokenisasi/lemmatisasi "
+                "bisa gagal di runtime. Periksa koneksi jaringan.", res,
+            )
 
 
 class TextPreprocessor:

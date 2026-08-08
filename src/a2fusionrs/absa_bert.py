@@ -97,11 +97,15 @@ DEFAULT_ASPECT_KEYWORDS: dict[str, dict[str, list[str]]] = {
 def _ensure_sentence_tokenizer() -> None:
     """Download resource NLTK yang dibutuhkan `sent_tokenize()`.
 
-    SENGAJA tidak menambah ke `preprocessing.ensure_nltk_resources()` (yang
-    sudah tervalidasi/dipakai stage lain) -- nltk versi terbaru (>=3.8.2)
-    butuh resource "punkt_tab" (bukan cuma "punkt") untuk sent_tokenize,
-    yang belum di-download di sana. Modul ABSA baru ini yang menanggung
-    risiko resource tambahan, bukan kode preprocessing yang sudah stabil.
+    CATATAN (diperbarui 2026-08-08): dulu fungsi ini sengaja TIDAK menambah
+    ke `preprocessing.ensure_nltk_resources()` supaya kode preprocessing yang
+    sudah stabil tidak menanggung risiko resource tambahan. Sejak
+    `punkt_tab` terbukti WAJIB di NLTK >= 3.9 (precompute gagal di Colab
+    dengan LookupError), resource itu sudah ditambahkan ke sana juga --
+    lengkap dengan perbaikan prefix path ("tokenizers/", bukan "corpora/",
+    yang sebelumnya membuat pengecekan selalu meleset). Fungsi ini tetap
+    dipertahankan sebagai penjamin lokal supaya modul ABSA tidak bergantung
+    pada urutan pemanggilan modul lain.
     """
     for resource in ("punkt", "punkt_tab"):
         try:

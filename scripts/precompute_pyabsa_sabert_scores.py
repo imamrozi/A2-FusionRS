@@ -54,7 +54,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.a2fusionrs.pyabsa_scorer import load_cached_scores  # noqa: E402
 from src.baseline.sentiment_bert import GlobalSentimentBERT, SentimentBertConfig  # noqa: E402
-from src.preprocessing import TextPreprocessor  # noqa: E402
+from src.preprocessing import TextPreprocessor, ensure_nltk_resources  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -228,6 +228,12 @@ def main() -> None:
         "dipakai untuk klaim apa pun (dataset mainan).",
     )
     args = ap.parse_args()
+
+    # EKSPLISIT, bukan menumpang efek samping konstruktor TextPreprocessor:
+    # `split_sentences()` memanggil nltk.sent_tokenize yang butuh resource
+    # 'punkt_tab' di NLTK >= 3.9. Tanpa ini, kegagalan baru muncul di tengah
+    # loop ekstraksi (LookupError), setelah dataset selesai dimuat.
+    ensure_nltk_resources()
 
     targets = {args.domain: DOMAINS[args.domain]} if args.domain else DOMAINS
     if args.quicktest:
