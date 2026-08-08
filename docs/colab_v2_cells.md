@@ -1,6 +1,11 @@
 # Cell Colab — A2-FusionRS v2 (ekstraksi PyABSA + skoring SA-BERT + token global)
 
 Salin tiap blok ke satu cell Colab, jalankan berurutan.
+
+**Catatan:** cell yang lama memakai `| tee`, BUKAN `| tail`. `tail` menahan
+seluruh output sampai perintah selesai, sehingga progres per-run (`MULAI
+(4/54)`) tidak terlihat sama sekali selama berjam-jam. `tee` menampilkannya
+langsung sekaligus menyimpan log.
 Branch: `phase2-a2-fusionrs-v2`.
 
 **Runtime: pilih GPU** (Runtime → Change runtime type → T4/L4). Cell 4
@@ -71,7 +76,7 @@ Ini prasyarat semua run berikutnya. Resumable: kalau terputus, jalankan lagi —
 domain yang sudah selesai dilewati otomatis.
 
 ```python
-!python scripts/precompute_pyabsa_sabert_scores.py 2>&1 | tail -40
+!python scripts/precompute_pyabsa_sabert_scores.py 2>&1 | tee /content/precompute.log
 ```
 
 Per domain saja (kalau mau bertahap):
@@ -103,7 +108,7 @@ for ckpt, label in [('yelp_restaurant','restaurant'),
 terputus.
 
 ```python
-!bash scripts/run_agf_v2_selection.sh 2>&1 | tail -60
+!bash scripts/run_agf_v2_selection.sh 2>&1 | tee /content/selection.log
 ```
 
 Pantau progres dari cell terpisah kalau perlu:
@@ -190,7 +195,7 @@ kalau hasil sudah ada — itu disengaja, supaya run ulang tidak diam-diam
 mengganti angka yang sudah dilaporkan.
 
 ```python
-!bash scripts/run_agf_v2_factorial.sh 2>&1 | tail -80
+!bash scripts/run_agf_v2_factorial.sh 2>&1 | tee /content/factorial.log
 ```
 
 Progres:
