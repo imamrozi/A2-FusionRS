@@ -1,0 +1,22 @@
+domain,representation,n_features,rmse
+Restaurant,kw_concat (A2-IRM apa adanya),8,0.7467797985810128
+Restaurant,kw_rich9 (order-stats),9,0.8408167352075927
+Restaurant,kw_concat + global,9,0.7343400575571507
+Restaurant,kw_rich9 + global,10,0.7331990982530776
+Restaurant,usulan_rich9 (PyABSA+SA-BERT),9,0.8043266733393276
+Restaurant,USULAN usulan_rich9 + global,10,0.7281604745624004
+Restaurant,[batas atas] usulan + kw_concat + global,18,0.7192046482874289
+E-commerce,kw_concat (A2-IRM apa adanya),10,0.7164173935663302
+E-commerce,kw_rich9 (order-stats),9,0.8106978650098258
+E-commerce,kw_concat + global,11,0.7079713439604515
+E-commerce,kw_rich9 + global,10,0.7073050203802594
+E-commerce,usulan_rich9 (PyABSA+SA-BERT),9,0.8084070967825648
+E-commerce,USULAN usulan_rich9 + global,10,0.6995655812609394
+E-commerce,[batas atas] usulan + kw_concat + global,20,0.6970024455872413
+Hotel,kw_concat (A2-IRM apa adanya),12,0.6828022885837578
+Hotel,kw_rich9 (order-stats),9,0.7238604346550291
+Hotel,kw_concat + global,13,0.6793660650823699
+Hotel,kw_rich9 + global,10,0.6777104823241401
+Hotel,usulan_rich9 (PyABSA+SA-BERT),9,0.7207454299294254
+Hotel,USULAN usulan_rich9 + global,10,0.6832274182028664
+Hotel,[batas atas] usulan + kw_concat + global,22,0.6673690367601346
