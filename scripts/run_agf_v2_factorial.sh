@@ -59,8 +59,8 @@ touch "$FAILED_LOG"
 # ============ PEMENANG SELEKSI DEV -- ISI SETELAH SELEKSI ============
 # JANGAN menebak nilai ini. Mengubahnya tanpa menjalankan ulang seleksi =
 # memilih arsitektur di test set.
-WINNER_D=""
-WINNER_WD=""
+WINNER_D="64"
+WINNER_WD="0.0"
 # =====================================================================
 
 if [ -z "$WINNER_D" ] || [ -z "$WINNER_WD" ]; then
