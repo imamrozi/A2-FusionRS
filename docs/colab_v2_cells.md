@@ -1,12 +1,13 @@
 # Cell Colab — A2-FusionRS v2 (ekstraksi PyABSA + skoring SA-BERT + token global)
 
 Salin tiap blok ke satu cell Colab, jalankan berurutan.
-
-**Catatan:** cell yang lama memakai `| tee`, BUKAN `| tail`. `tail` menahan
-seluruh output sampai perintah selesai, sehingga progres per-run (`MULAI
-(4/54)`) tidak terlihat sama sekali selama berjam-jam. `tee` menampilkannya
-langsung sekaligus menyimpan log.
 Branch: `phase2-a2-fusionrs-v2`.
+
+**Catatan:** cell yang berjalan lama memakai `| tee`, BUKAN `| tail`. `tail`
+menahan seluruh output sampai perintah selesai, sehingga progres per-run
+(`MULAI (4/54)`) tidak terlihat sama sekali selama berjam-jam — mustahil
+membedakan "sedang jalan" dari "menggantung". `tee` menampilkannya langsung
+sekaligus menyimpan log ke `/content/`.
 
 **Runtime: pilih GPU** (Runtime → Change runtime type → T4/L4). Cell 4
 (precompute) butuh GPU; sisanya jalan di CPU tapi jauh lebih lambat.
