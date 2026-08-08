@@ -729,6 +729,7 @@ def run_pipeline(
     residual_base: str = "none",
     extra_pyabsa: str = "none",
     global_sentiment_token: bool = False,
+    agf_overrides: dict | None = None,
     run_tag: str = "",
     export_interpretability: bool = False,
     stage: str = "select",
@@ -1033,6 +1034,7 @@ def run_pipeline(
     n_params = None
     gate_weights_test = None
     gate_modalities = None  # modalitas aktual yg dipakai AGF (utk nama kolom gate CSV)
+    agf_cfg = None  # tetap None utk skenario non-AGF (tree / regresi linear)
 
     if scenario == "static_pyabsa":
         # Sel faktorial "Static (NMF+DT) + Model-based ABSA" -- reuse
@@ -1342,13 +1344,26 @@ def run_pipeline(
         train_y_norm = ((train_df["stars"].values - rating_min) / scale_range).astype(np.float32)
         val_y_norm = ((val_df["stars"].values - rating_min) / scale_range).astype(np.float32)
 
+        # Override CLI (agf_overrides) menang atas config YAML. Dipakai grid
+        # seleksi kapasitas AGF di selection_dev -- axis ini BELUM PERNAH
+        # di-tune sama sekali (d/n_heads/epochs/weight_decay selalu memakai
+        # default), padahal weight_decay langsung relevan utk klaim
+        # ROBUSTNESS: ia menekan koreksi ke nol sehingga AGF belajar koreksi
+        # yang robust, bukan menghafal noise train.
+        _agf_yaml = config.get("agf", {})
+
+        def _agf_param(name: str, default):
+            if agf_overrides and agf_overrides.get(name) is not None:
+                return agf_overrides[name]
+            return _agf_yaml.get(name, default)
+
         agf_cfg = AGFConfig(
-            d=config.get("agf", {}).get("d", 64),
-            n_heads=config.get("agf", {}).get("n_heads", 2),
-            epochs=config.get("agf", {}).get("epochs", 30),
+            d=_agf_param("d", 64),
+            n_heads=_agf_param("n_heads", 2),
+            epochs=_agf_param("epochs", 30),
             batch_size=config.get("agf", {}).get("batch_size", 512),
             learning_rate=config.get("agf", {}).get("learning_rate", 0.001),
-            weight_decay=config.get("agf", {}).get("weight_decay", 0.0),
+            weight_decay=_agf_param("weight_decay", 0.0),
             use_attention=scenario_cfg["use_attention"],
             pooling=scenario_cfg["pooling"],
             residual=(residual_base != "none"),
@@ -1463,6 +1478,13 @@ def run_pipeline(
         "residual_base": residual_base,
         "extra_pyabsa": extra_pyabsa,
         "global_sentiment_token": global_sentiment_token,
+        # Kapasitas AGF -- dicatat supaya analisis seleksi bisa membacanya
+        # langsung dari hasil, bukan menebak dari nama file. None utk
+        # skenario non-AGF (tree/regresi linear).
+        "agf_d": agf_cfg.d if agf_cfg is not None else None,
+        "agf_n_heads": agf_cfg.n_heads if agf_cfg is not None else None,
+        "agf_epochs": agf_cfg.epochs if agf_cfg is not None else None,
+        "agf_weight_decay": agf_cfg.weight_decay if agf_cfg is not None else None,
         "run_tag": run_tag,
         "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}', "
         f"stage '{stage}' (evaluasi di {eval_split_label})"
@@ -1546,6 +1568,25 @@ if __name__ == "__main__":
         "arsitektur bersih a2fusionrs_clean).",
     )
     parser.add_argument(
+        "--agf-d", type=int, default=None,
+        help="Override dimensi embedding bersama AGF (config agf.d, default 64). "
+        "Axis seleksi kapasitas -- BELUM PERNAH di-tune.",
+    )
+    parser.add_argument(
+        "--agf-heads", type=int, default=None,
+        help="Override jumlah attention head AGF (config agf.n_heads, default 2).",
+    )
+    parser.add_argument(
+        "--agf-epochs", type=int, default=None,
+        help="Override epoch training AGF (config agf.epochs, default 30).",
+    )
+    parser.add_argument(
+        "--agf-weight-decay", type=float, default=None,
+        help="Override L2 regularisasi Adam AGF (config agf.weight_decay, default 0). "
+        "Relevan langsung utk klaim ROBUSTNESS: menekan koreksi ke nol sehingga AGF "
+        "belajar koreksi robust, bukan menghafal noise train.",
+    )
+    parser.add_argument(
         "--global-sentiment-token", action="store_true",
         help="Tambahkan token SENTIMEN GLOBAL level-review (skor SA-BERT seluruh review) sbg "
         "modalitas AGF. Temuan Gerbang-3: selisih yang semula dikira 'nilai struktur "
@@ -1602,6 +1643,10 @@ if __name__ == "__main__":
         residual_base=args.residual_base,
         extra_pyabsa=args.extra_pyabsa,
         global_sentiment_token=args.global_sentiment_token,
+        agf_overrides={
+            "d": args.agf_d, "n_heads": args.agf_heads,
+            "epochs": args.agf_epochs, "weight_decay": args.agf_weight_decay,
+        },
         run_tag=args.run_tag,
         export_interpretability=args.export_interpretability,
         stage=args.stage,
