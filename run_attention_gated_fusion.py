@@ -364,6 +364,69 @@ def _compute_absa_features(
     raise ValueError(f"absa_source '{absa_source}' tidak dikenal -- pakai 'keyword' atau 'pyabsa'.")
 
 
+def _compute_global_sentiment_modality(
+    config: dict, splits: dict
+) -> dict[str, np.ndarray]:
+    """Token SENTIMEN GLOBAL level-review (skor SA-BERT seluruh review).
+
+    ALASAN (temuan Gerbang-3, lihat reports/gates_1_3_summary.md): selisih
+    5,7-11,6% antara `keyword_concat_conf` dan bentuk order-statistics yang
+    semula dikira "nilai struktur posisi-tetap" ternyata BUKAN struktur --
+    melainkan akses ke skor review global. Pada keyword-ABSA, aspek yang
+    tidak match diisi skor SELURUH REVIEW, sehingga mayoritas kolomnya
+    sebenarnya memuat sinyal global itu secara cuma-cuma. Ringkasan
+    order-statistics menghancurkan akses tersebut.
+
+    Menambahkan skor global sebagai token EKSPLISIT memulihkannya, dan pada
+    probe linier kanal-sentimen justru MENGUNGGULI concat posisi-tetap:
+        kw_rich9          0,8408 / 0,8107 / 0,7239
+        kw_rich9 + global 0,7332 / 0,7073 / 0,6777   (R / E / H)
+
+    KEJUJURAN YANG WAJIB DIPERTAHANKAN: token ini menolong KEDUA cabang
+    (keyword maupun PyABSA). Ia BUKAN keunggulan PyABSA, melainkan fitur
+    yang hilang dari representasi gaya A2-IRM. Karena itu klaim keunggulan
+    HARUS dibandingkan terhadap sel keyword yang JUGA diberi token ini
+    (`--scenario agf_keyword --extra-pyabsa none --global-sentiment-token`),
+    bukan terhadap A2-IRM polos -- kalau tidak, kontribusi PyABSA
+    terlebih-lebih ~2x (probe linier: -2,5%/-2,4%/+0,1% thd pembanding naif
+    vs -0,8%/-1,2%/+0,6% thd pembanding adil).
+
+    Tidak memuat model apa pun: skor SA-BERT level-review sudah ter-cache
+    penuh untuk 100% baris ketiga domain (`sentiment_scores.csv`), hasil
+    run_baseline.py. Konsisten dgn scorer yang dipakai A2-IRM -> tetap
+    1x ABSA, satu scorer pada dua granularitas.
+    """
+    path = Path(config["logging"]["checkpoint_dir"]) / "sentiment_bert" / "sentiment_scores.csv"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Cache skor sentimen global tidak ditemukan di {path} -- "
+            "jalankan run_baseline.py (tahap SA) dulu."
+        )
+    scores = pd.read_csv(path).set_index("review_id")["sentiment_score"]
+
+    out = {}
+    for name, part_df in splits.items():
+        merged = part_df[["review_id"]].merge(
+            scores, left_on="review_id", right_index=True, how="left"
+        )
+        n_missing = int(merged["sentiment_score"].isna().sum())
+        if n_missing:
+            # Netral 0,5 utk baris tanpa skor. Di ketiga domain cakupannya
+            # 100%, jadi cabang ini seharusnya tidak pernah aktif -- kalau
+            # aktif, itu sinyal cache tidak sinkron dgn split dan WAJIB
+            # terlihat di log, bukan lolos diam-diam.
+            logger.warning(
+                "Token sentimen global: %d/%d baris split '%s' TIDAK punya skor "
+                "-> diisi 0,5. Periksa sinkronisasi cache dgn split!",
+                n_missing, len(merged), name,
+            )
+            merged["sentiment_score"] = merged["sentiment_score"].fillna(0.5)
+        out[name] = merged[["sentiment_score"]].to_numpy(np.float32)
+
+    logger.info("Token SENTIMEN GLOBAL (1 fitur) dihitung utk semua split dari cache SA-BERT.")
+    return out
+
+
 def _compute_pyabsa_rich_modality(
     config: dict, exp_cfg: dict, splits: dict, rich: bool = True
 ) -> dict[str, np.ndarray]:
@@ -538,6 +601,7 @@ def run_pipeline(
     representation: str = "vector",
     residual_base: str = "none",
     extra_pyabsa: str = "none",
+    global_sentiment_token: bool = False,
     run_tag: str = "",
     export_interpretability: bool = False,
     stage: str = "select",
@@ -954,6 +1018,15 @@ def run_pipeline(
         aspect_seq = None
         aspect_vocab = None
         splits_for_pyabsa = {"train": train_df, "val": val_df, "test": test_df}
+
+        # Token sentimen global (Gerbang-3). Ditambahkan SEBELUM token PyABSA
+        # supaya urutan modalitas stabil & terbaca di log/gates_*.csv.
+        if global_sentiment_token:
+            all_feature_sources["global_sent"] = _compute_global_sentiment_modality(
+                config, splits_for_pyabsa
+            )
+            if "global_sent" not in modalities:
+                modalities = modalities + ["global_sent"]
         if extra_pyabsa in ("rich", "summary"):
             pyabsa_extra = _compute_pyabsa_rich_modality(
                 config, exp_cfg, splits_for_pyabsa, rich=(extra_pyabsa == "rich")
@@ -1233,6 +1306,7 @@ def run_pipeline(
         "representation": representation,
         "residual_base": residual_base,
         "extra_pyabsa": extra_pyabsa,
+        "global_sentiment_token": global_sentiment_token,
         "run_tag": run_tag,
         "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}', "
         f"stage '{stage}' (evaluasi di {eval_split_label})"
@@ -1315,6 +1389,16 @@ if __name__ == "__main__":
         "arsitektur bersih a2fusionrs_clean).",
     )
     parser.add_argument(
+        "--global-sentiment-token", action="store_true",
+        help="Tambahkan token SENTIMEN GLOBAL level-review (skor SA-BERT seluruh review) sbg "
+        "modalitas AGF. Temuan Gerbang-3: selisih yang semula dikira 'nilai struktur "
+        "posisi-tetap' sebenarnya adalah akses ke skor global ini -- keyword-ABSA "
+        "mendapatkannya cuma-cuma lewat pengisian aspek tak-match. Token ini menolong "
+        "KEDUA cabang, jadi sel pembanding keyword WAJIB juga memakainya "
+        "(--scenario agf_keyword --extra-pyabsa none --global-sentiment-token) "
+        "supaya klaim keunggulan tidak terlebih-lebih ~2x.",
+    )
+    parser.add_argument(
         "--run-tag", type=str, default="",
         help="Suffix nama file hasil supaya run diagnostik tidak menimpa hasil utama (mis. 'norm').",
     )
@@ -1360,6 +1444,7 @@ if __name__ == "__main__":
         representation=args.representation,
         residual_base=args.residual_base,
         extra_pyabsa=args.extra_pyabsa,
+        global_sentiment_token=args.global_sentiment_token,
         run_tag=args.run_tag,
         export_interpretability=args.export_interpretability,
         stage=args.stage,
