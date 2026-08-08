@@ -541,9 +541,29 @@ def _compute_sabert_aspect_rich_modality(
 
 
 def _compute_sabert_aspect_sequences(
-    config: dict, exp_cfg: dict, splits: dict, max_aspects: int = 8, vocab_top_k: int = 500
+    config: dict, exp_cfg: dict, splits: dict, max_aspects: int = 8, vocab_top_k: int = 2000
 ) -> tuple[dict, dict]:
     """Sequence aspek (identitas + skor SA-BERT) utk AspectSequencePooling.
+
+    `vocab_top_k=2000` (bukan 500 seperti jalur PyABSA lama). Alasannya
+    murni dari STATISTIK DATA TRAINING, diputuskan SEBELUM satu pun run
+    dev/test dijalankan -- bukan dari hasil performa apa pun:
+
+        cakupan kemunculan aspek oleh top-K istilah
+        domain        top-500   top-2000
+        restaurant      82,7%     91,8%
+        e-commerce      72,8%     85,3%
+        hotel           91,8%     97,0%
+
+    Dengan top-500, lebih dari SEPEREMPAT kemunculan aspek e-commerce jatuh
+    ke UNK -- persis domain yang kalah paling parah di faktorial v1. Token
+    identitas aspek praktis kosong di situ, sehingga sel sequence tidak akan
+    bisa mengalahkan sel tanpa-sequence bukan karena idenya salah, melainkan
+    karena sinyalnya tidak sampai. Biayanya kecil: tabel embedding tumbuh
+    dari 502x16 jadi 2002x16 parameter.
+
+    Nilai ini sengaja TIDAK dijadikan flag CLI: menjadikannya axis yang bisa
+    disetel membuka peluang menyetelnya di test set.
 
     Vocab istilah aspek dibangun HANYA dari TRAIN -- mencegah kebocoran
     identitas aspek dari val/test, konsisten dgn
@@ -1485,6 +1505,9 @@ def run_pipeline(
         "agf_n_heads": agf_cfg.n_heads if agf_cfg is not None else None,
         "agf_epochs": agf_cfg.epochs if agf_cfg is not None else None,
         "agf_weight_decay": agf_cfg.weight_decay if agf_cfg is not None else None,
+        # Ukuran vocab identitas aspek yang BENAR-BENAR terbentuk dari train.
+        # Dicatat supaya cakupan UNK bisa diaudit dari hasil, bukan diasumsikan.
+        "aspect_vocab_size": (len(aspect_vocab) if aspect_vocab is not None else None),
         "run_tag": run_tag,
         "notes": f"A2-FusionRS Fase 2, skenario ablasi '{scenario}', sumber ABSA '{absa_source}', "
         f"stage '{stage}' (evaluasi di {eval_split_label})"
