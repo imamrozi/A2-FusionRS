@@ -69,6 +69,7 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -470,6 +471,132 @@ def _compute_pyabsa_rich_modality(
     return out
 
 
+SABERT_ASPECT_RICH_NAMES = [
+    "n_aspects_norm", "mean_pos", "min_pos", "max_pos", "range_pos",
+    "max_neg", "mean_confidence", "frac_negative", "frac_positive",
+]
+
+
+def _load_sabert_aspect_cache(config: dict, exp_cfg: dict) -> tuple[dict, dict]:
+    """Muat cache skor SA-BERT atas aspek hasil ekstraksi PyABSA
+    (hasil scripts/precompute_pyabsa_sabert_scores.py).
+
+    Return ({review_id: [(istilah, skor), ...]}, {review_id: skor_fallback}).
+    """
+    pdir = Path(config["logging"]["checkpoint_dir"]) / "pyabsa"
+    label = PYABSA_CACHE_DOMAIN_LABEL.get(exp_cfg["domain"], exp_cfg["domain"])
+    sc_path = pdir / f"sabert_aspect_scores_{label}.csv"
+    fb_path = pdir / f"sabert_fallback_{label}.csv"
+    if not sc_path.exists() or not fb_path.exists():
+        raise FileNotFoundError(
+            f"Cache SA-BERT-atas-aspek-PyABSA tidak ditemukan ({sc_path.name} / "
+            f"{fb_path.name}) -- jalankan scripts/precompute_pyabsa_sabert_scores.py "
+            f"--domain {exp_cfg['domain']} dulu (butuh GPU, jalankan di Colab)."
+        )
+    sc = pd.read_csv(sc_path)
+    per_review: dict = {}
+    for rid, term, s in zip(sc["review_id"], sc["aspect_term"], sc["sabert_score"]):
+        per_review.setdefault(rid, []).append((str(term), float(s)))
+    fb = pd.read_csv(fb_path)
+    return per_review, dict(zip(fb["review_id"], fb["fallback_score"]))
+
+
+def _compute_sabert_aspect_rich_modality(
+    config: dict, exp_cfg: dict, splits: dict
+) -> dict[str, np.ndarray]:
+    """Order-statistics 9-dim atas skor SA-BERT per aspek PyABSA.
+
+    Bentuk kolomnya sengaja DISAMAKAN dgn `vectorize_absa_features_rich`
+    (versi berbasis probabilitas PyABSA) supaya selisih antara keduanya
+    murni mencerminkan SCORER, bukan bentuk fitur -- inilah desain yang
+    dipakai Gerbang-1 utk membuktikan ekstraksi PyABSA >= leksikon keyword
+    ketika scorer disetarakan.
+    """
+    per_review, fallback = _load_sabert_aspect_cache(config, exp_cfg)
+
+    out = {}
+    for name, part_df in splits.items():
+        rids = part_df["review_id"].tolist()
+        arr = np.zeros((len(rids), len(SABERT_ASPECT_RICH_NAMES)), dtype=np.float32)
+        for i, rid in enumerate(rids):
+            pairs = per_review.get(rid)
+            if not pairs:
+                fb = float(fallback.get(rid, 0.5))
+                arr[i] = [0.0, fb, fb, fb, 0.0, 1.0 - fb, 0.0, 0.0, 0.0]
+                continue
+            s = np.asarray([v for _, v in pairs], dtype=np.float32)
+            arr[i] = [
+                min(len(s) / 3.0, 1.0),
+                float(s.mean()), float(s.min()), float(s.max()),
+                float(s.max() - s.min()), float((1.0 - s).max()),
+                float(np.abs(s - 0.5).mean() * 2.0),
+                float((s < 0.5).mean()), float((s >= 0.5).mean()),
+            ]
+        out[name] = arr
+    logger.info(
+        "Modalitas PyABSA-ekstraksi + SA-BERT-skoring (rich, %d fitur) dihitung utk semua split.",
+        out["train"].shape[1],
+    )
+    return out
+
+
+def _compute_sabert_aspect_sequences(
+    config: dict, exp_cfg: dict, splits: dict, max_aspects: int = 8, vocab_top_k: int = 500
+) -> tuple[dict, dict]:
+    """Sequence aspek (identitas + skor SA-BERT) utk AspectSequencePooling.
+
+    Vocab istilah aspek dibangun HANYA dari TRAIN -- mencegah kebocoran
+    identitas aspek dari val/test, konsisten dgn
+    `_compute_pyabsa_aspect_sequences`.
+
+    Fitur per-aspek (4-dim) mengikuti tata letak yang sama dgn jalur PyABSA
+    ([P_neg, P_neu, P_pos, confidence]) supaya AspectSequencePooling tidak
+    perlu diubah: SA-BERT biner -> P_neg=1-s, P_neu=0, P_pos=s,
+    confidence=|s-0,5|*2.
+    """
+    per_review, fallback = _load_sabert_aspect_cache(config, exp_cfg)
+
+    counter: Counter = Counter()
+    for rid in splits["train"]["review_id"]:
+        for term, _ in per_review.get(rid, []):
+            counter[term] += 1
+    vocab = {t: i + 2 for i, (t, _) in enumerate(counter.most_common(vocab_top_k))}
+    logger.info(
+        "Vocab aspek SA-BERT dibangun dari TRAIN saja: %d istilah (0=PAD, 1=UNK).", len(vocab)
+    )
+
+    out = {}
+    n_trunc = 0
+    for name, part_df in splits.items():
+        rids = part_df["review_id"].tolist()
+        n = len(rids)
+        ids = np.zeros((n, max_aspects), dtype=np.int64)
+        feats = np.zeros((n, max_aspects, 4), dtype=np.float32)
+        mask = np.zeros((n, max_aspects), dtype=bool)
+        for i, rid in enumerate(rids):
+            pairs = per_review.get(rid)
+            if not pairs:
+                s = float(fallback.get(rid, 0.5))
+                ids[i, 0] = 1  # UNK: fallback seluruh-review
+                feats[i, 0] = [1.0 - s, 0.0, s, abs(s - 0.5) * 2.0]
+                mask[i, 0] = True
+                continue
+            if len(pairs) > max_aspects:
+                n_trunc += 1
+            for j, (term, s) in enumerate(pairs[:max_aspects]):
+                ids[i, j] = vocab.get(term, 1)
+                feats[i, j] = [1.0 - s, 0.0, s, abs(s - 0.5) * 2.0]
+                mask[i, j] = True
+        out[name] = {"ids": ids, "feats": feats, "mask": mask}
+
+    total = sum(len(v["ids"]) for v in out.values())
+    logger.info(
+        "Sequence aspek SA-BERT: max_aspects=%d, %d/%d baris terpotong (%.2f%%).",
+        max_aspects, n_trunc, total, 100.0 * n_trunc / total if total else 0.0,
+    )
+    return vocab, out
+
+
 def _compute_pyabsa_aspect_sequences(
     config: dict, exp_cfg: dict, splits: dict, max_aspects: int = 8, vocab_top_k: int = 500
 ) -> tuple[dict, dict]:
@@ -652,9 +779,15 @@ def run_pipeline(
             f"residual_base '{residual_base}' -- pakai 'none'/'user_item_bias'/"
             "'static_fusion'/'static_fusion_oof'."
         )
-    if extra_pyabsa not in ("none", "rich", "summary", "perseq", "perseq_rich"):
+    if extra_pyabsa not in (
+        "none", "rich", "summary", "perseq", "perseq_rich",
+        "sabert_rich", "sabert_perseq_rich",
+    ):
         raise ValueError(
-            f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'/'perseq'/'perseq_rich'."
+            f"extra_pyabsa '{extra_pyabsa}' -- pakai 'none'/'rich'/'summary'/'perseq'/"
+            "'perseq_rich' (skoring PyABSA generik) atau 'sabert_rich'/'sabert_perseq_rich' "
+            "(ekstraksi PyABSA + skoring SA-BERT per-domain, butuh cache dari "
+            "scripts/precompute_pyabsa_sabert_scores.py)."
         )
     if scenario not in ALL_SCENARIOS:
         raise ValueError(f"scenario '{scenario}' tidak dikenal -- pilih salah satu dari {ALL_SCENARIOS}.")
@@ -678,8 +811,10 @@ def run_pipeline(
         if extra_pyabsa == "none":
             raise ValueError(
                 f"scenario '{scenario}' tidak memakai stream ABSA keyword sama sekali, jadi "
-                "sentimen HARUS masuk lewat PyABSA: --extra-pyabsa perseq_rich (arsitektur "
-                "target), atau perseq/rich/summary utk sel ablasi. Dgn 'none' model tidak "
+                "sentimen HARUS masuk lewat PyABSA: --extra-pyabsa sabert_perseq_rich "
+                "(arsitektur target pasca-diagnosis: ekstraksi PyABSA + skoring SA-BERT), "
+                "perseq_rich (target lama, skoring PyABSA generik), atau "
+                "perseq/rich/summary/sabert_rich utk sel ablasi. Dgn 'none' model tidak "
                 "punya sinyal sentimen apa pun."
             )
     if scenario == "static_pyabsa_rich" and extra_pyabsa != "none":
@@ -1061,6 +1196,27 @@ def run_pipeline(
             all_feature_sources["pyabsa"] = pyabsa_extra
             if "pyabsa" not in modalities:
                 modalities = modalities + ["pyabsa"]
+        elif extra_pyabsa in ("sabert_rich", "sabert_perseq_rich"):
+            # ARSITEKTUR USULAN PASCA-DIAGNOSIS: PyABSA dipakai untuk
+            # EKSTRAKSI aspek, SA-BERT per-domain untuk SKORING -- scorer yg
+            # SAMA PERSIS dgn A2-IRM, sehingga perbandingannya adil.
+            # Alasannya: reports/pyabsa_vs_keyword_diagnosis.md membuktikan
+            # gap PyABSA-vs-keyword berasal dari SUPERVISI scorer (PyABSA
+            # generik vs SA-BERT yg di-fine-tune pada label turunan `stars`),
+            # bukan dari kualitas ekstraksi. Gerbang-1 memvalidasi: dgn scorer
+            # disetarakan, ekstraksi PyABSA >= leksikon keyword di 3/3 domain.
+            #
+            # Tetap 1x ABSA: satu ekstraktor (PyABSA), satu scorer (SA-BERT).
+            # Skor dibaca dari cache precompute -- TIDAK memuat BERT di sini.
+            if extra_pyabsa == "sabert_perseq_rich":
+                aspect_vocab, aspect_seq = _compute_sabert_aspect_sequences(
+                    config, exp_cfg, splits_for_pyabsa
+                )
+            all_feature_sources["pyabsa"] = _compute_sabert_aspect_rich_modality(
+                config, exp_cfg, splits_for_pyabsa
+            )
+            if "pyabsa" not in modalities:
+                modalities = modalities + ["pyabsa"]
 
         # RESIDUAL base ("jangkar"): AGF belajar KOREKSI di atas prediksi
         # base, bukan meregresi level rating dari nol lewat sigmoid.
@@ -1196,7 +1352,7 @@ def run_pipeline(
             use_attention=scenario_cfg["use_attention"],
             pooling=scenario_cfg["pooling"],
             residual=(residual_base != "none"),
-            aspect_pooling=(extra_pyabsa in ("perseq", "perseq_rich")),
+            aspect_pooling=(extra_pyabsa in ("perseq", "perseq_rich", "sabert_perseq_rich")),
             aspect_vocab_size=(len(aspect_vocab) if aspect_vocab is not None else 0),
             aspect_emb_dim=config.get("agf", {}).get("aspect_emb_dim", 16),
         )
@@ -1221,7 +1377,7 @@ def run_pipeline(
         )
         n_params = agf_trainer.n_parameters
         gate_modalities = modalities + (
-            ["pyabsa_aspect"] if extra_pyabsa in ("perseq", "perseq_rich") else []
+            ["pyabsa_aspect"] if extra_pyabsa in ("perseq", "perseq_rich", "sabert_perseq_rich") else []
         )
 
         t0 = time.time()
@@ -1382,7 +1538,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--extra-pyabsa", type=str, default="none",
-        choices=["none", "rich", "summary", "perseq", "perseq_rich"],
+        choices=["none", "rich", "summary", "perseq", "perseq_rich",
+                 "sabert_rich", "sabert_perseq_rich"],
         help="Sinyal PyABSA per-aspek utk AGF (BUKAN ke base): 'rich'=order-stats kontras (9-dim), "
         "'summary'=5-dim rata-rata, 'perseq'=sequence aspek + IDENTITAS via AspectSequencePooling, "
         "'perseq_rich'=perseq + ringkasan 9-dim dari SATU pass skoring yang sama (dipakai "
